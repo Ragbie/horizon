@@ -22,7 +22,9 @@ fn hdr_pack(sized: bool, format: &str) -> Post {
         add(
             &format!("{program}.fsh"),
             &format!(
-                "#version 120\n/* RENDERTARGETS:{buffer} */\n/* const int colortex{buffer}Format={format}; */\nvoid main() {{ gl_FragData[0]=vec4(0,0.5,0,1); }}\n"
+                // The format on its own line of the comment: Iris (and Horizon since #9087) ignores
+                // a `const` on the `/*` line.
+                "#version 120\n/* RENDERTARGETS:{buffer} */\n/*\nconst int colortex{buffer}Format={format};\n*/\nvoid main() {{ gl_FragData[0]=vec4(0,0.5,0,1); }}\n"
             ),
         );
         if sized {
