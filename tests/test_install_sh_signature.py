@@ -2,9 +2,11 @@
 
 PURPOSE: keep install.sh's Ed25519 check from regressing (docs/release-flow.md, "Signed checksums").
 REFS: tests/install_sh_signature.sh, tools/ci/sign_release.sh.
-Skips quietly without bash or OpenSSL 3. Headless, no network.
+Skips quietly without bash or OpenSSL 3, and on Windows: install.sh is for Linux and macOS servers, and a bare
+"bash" there is WSL's from System32 (#7160). Headless, no network.
 """
 
+import os
 import shutil
 import subprocess
 import unittest
@@ -14,6 +16,7 @@ SCRIPT = Path(__file__).with_name("install_sh_signature.sh")
 
 
 class InstallShSignature(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "install.sh is for Linux and macOS")
     @unittest.skipUnless(shutil.which("bash") and shutil.which("openssl"), "bash and openssl needed")
     def test_signature_cases(self):
         run = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True, timeout=300)
