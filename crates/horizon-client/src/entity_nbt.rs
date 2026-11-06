@@ -500,11 +500,22 @@ pub fn mob_to_nbt(
     } else if let Tag::Compound(map) = &mut tag {
         map.remove(&"CustomNameVisible".into());
     }
-    // A styled name from the save stays unless the name changed.
-    if custom_name(&tag) != m.custom_name
-        && let Some(name) = &m.custom_name
-    {
-        put(&mut tag, "CustomName", Tag::String(name.as_str().into()));
+    // A name from the save keeps its own shape unless it changed; a styled
+    // name (a name tag's, an egg's) is saved whole.
+    match (&m.custom_name_text, &m.custom_name) {
+        (Some(text), _) => {
+            if !tag.get("CustomName").is_some_and(|t| name_text(t) == *text) {
+                put(
+                    &mut tag,
+                    "CustomName",
+                    crate::scoreboard::json_to_tag(&text.component()),
+                );
+            }
+        }
+        (None, Some(name)) if custom_name(&tag) != m.custom_name => {
+            put(&mut tag, "CustomName", Tag::String(name.as_str().into()));
+        }
+        _ => {}
     }
     let Tag::Compound(map) = &mut tag else {
         return tag;
@@ -4142,6 +4153,26 @@ mod tests {
         }
     }
 
+    /// `Entity.getDisplayName` and `saveWithoutId`: a styled custom name is
+    /// the command name and is saved whole, over an older saved name.
+    #[test]
+    fn a_styled_mob_name_is_its_command_name_and_saved_whole() {
+        let kind = crate::mobs::sensor_scan_tests::kind();
+        let mut mob = Mob::new(1, kind, Vec3::ZERO, 0.0);
+        let styled = Tag::compound([("text", string("Tagged")), ("color", string("aqua"))]);
+        mob.custom_name = Some("Tagged".into());
+        mob.custom_name_text = Some(name_text(&styled));
+        assert_eq!(mob.command_name(), name_text(&styled));
+        let raw = Tag::compound([("CustomName", string("Old"))]);
+        let saved = mob_to_nbt(&mob, [0; 4], Some(&raw), None, |_| None);
+        assert_eq!(saved.get("CustomName").map(name_text), Some(name_text(&styled)));
+        assert!(matches!(saved.get("CustomName"), Some(Tag::Compound(_))));
+        // A plain name keeps being saved as a string.
+        mob.custom_name_text = None;
+        let saved = mob_to_nbt(&mob, [0; 4], Some(&raw), None, |_| None);
+        assert_eq!(text(saved.get("CustomName")).as_deref(), Some("Tagged"));
+    }
+
     #[test]
     fn other_mob_command_names_keep_their_type_and_custom_name() {
         use crate::mobs::Species;
@@ -5042,6 +5073,8 @@ pub fn apply_item_components(m: &mut Mob, stack: &crate::items::ItemStack) {
     };
     if let Some(name) = stack.custom_name() {
         m.custom_name = Some(name);
+        // Entity.applyImplicitComponent(CUSTOM_NAME): the whole text.
+        m.custom_name_text = components.custom_name.as_ref().map(name_text);
     }
     if let Some(data) = components.other("minecraft:bucket_entity_data") {
         if let Some(v) = number(data.get("Age")) {

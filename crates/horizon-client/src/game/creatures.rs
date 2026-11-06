@@ -6844,22 +6844,42 @@ impl Game<'_> {
         }
         Ok(true)
     }
-    /// `EntityType.updateCustomEntityTag`: the egg's `minecraft:entity_data` on
-    /// the mob it spawned, once the guards let it through, as
-    /// `TypedEntityData.loadInto`: the mob's own compound, the data merged over
-    /// it, loaded back into the same mob (`/data merge entity`'s loader).
+    /// `EntityType.createDefaultStackConfig` on the mob an egg spawned: the
+    /// egg's custom name (the whole text, style included) and custom data
+    /// (`Entity.applyImplicitComponent`, saved as `CustomName` and `data`),
+    /// then `EntityType.updateCustomEntityTag`: its `minecraft:entity_data`,
+    /// once the guards let it through, merged over the mob's own compound as
+    /// `TypedEntityData.loadInto` does and loaded back into the same mob
+    /// (`/data merge entity`'s loader).
     pub(super) fn apply_spawn_egg_entity_data(&mut self, id: u32, stack: &ItemStack) {
+        use horizon_world::nbt::Tag;
         let Some(i) = self.mobs.iter().position(|m| m.id == id) else {
             return;
         };
         let kind = self.mobs[i].kind.id.clone();
         let op = self.acting_player_is_op();
-        let Some(data) = horizon_client::block_entity_item::spawn_egg_entity_data(stack, &kind, op)
-        else {
+        let name = stack.data().and_then(|d| d.custom_name.clone());
+        let custom = stack
+            .data()
+            .and_then(|d| d.other("minecraft:custom_data"))
+            .cloned();
+        let data = horizon_client::block_entity_item::spawn_egg_entity_data(stack, &kind, op);
+        if name.is_none() && custom.is_none() && data.is_none() {
             return;
+        }
+        let mut own = self.mob_tree_nbt(i);
+        if let Tag::Compound(map) = &mut own {
+            if let Some(name) = name {
+                map.insert("CustomName".into(), name);
+            }
+            if let Some(custom) = custom {
+                map.insert("data".into(), custom);
+            }
+        }
+        let tag = match data {
+            Some(data) => horizon_client::data_cmd::merged(&own, data),
+            None => own,
         };
-        let own = self.mob_tree_nbt(i);
-        let tag = horizon_client::data_cmd::merged(&own, data);
         // Nothing to report: the mob's own compound always loads back.
         let _ = self.apply_entity_nbt(super::commands::Target::Mob(id), tag);
     }
