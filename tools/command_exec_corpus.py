@@ -955,10 +955,19 @@ def spawn_egg_stack_config():
     sel = near.format(x=12, z=4)
     ops += [cmd(f'/execute if entity {sel}')]
     ops += [cmd(f'/data get entity {sel} {r}') for r in ('CustomName', 'data')]
+    # MobBucketItem.spawn from a dispenser: the same config, the bucket's name and custom data.
+    ops += setup('/setblock 8 200 3 dispenser[facing=south]', '/setblock 8 199 4 water', '/setblock 8 200 4 water',
+                 '/item replace block 8 200 3 container.0 with minecraft:axolotl_bucket[custom_name={text:"Axo",'
+                 'color:"gold"},custom_data={b:1b}]',
+                 '/setblock 8 201 3 redstone_block')
+    ops += [{'op': 'tick', 'n': 6}]
+    sel = '@e[type=minecraft:axolotl,x=8.5,y=200,z=4.5,distance=..2,limit=1]'
+    ops += [cmd(f'/execute if entity {sel}')]
+    ops += [cmd(f'/data get entity {sel} {r}') for r in ('CustomName', 'data')]
     # Entity.getDisplayName in a command reply: the custom name's whole text, style included.
     ops += setup('/summon pig 13.5 200 10.5 {NoAI:1b,CustomName:{text:"Sum",color:"green",bold:true}}')
     ops += [cmd('/data get entity @e[type=minecraft:pig,x=13.5,y=200,z=10.5,distance=..1,limit=1] NoAI')]
-    ops += setup('/kill @e[type=minecraft:pig]', '/fill 0 200 0 15 203 15 air',
+    ops += setup('/kill @e[type=minecraft:pig]', '/kill @e[type=minecraft:axolotl]', '/setblock 8 199 4 stone', '/fill 0 200 0 15 203 15 air',
                  '/gamemode survival', '/forceload remove 0 0 15 15')
     return ops
 

@@ -6732,6 +6732,12 @@ impl Game<'_> {
         if let Some(child) = self.mobs.iter_mut().find(|m| m.id == id) {
             horizon_client::mobs::finalize::spawn_egg_offspring(child, species, variant, color);
         }
+        // SpawnEggItem.spawnOffspringFromSpawnEgg: applyComponentsFromItemStack
+        // (the egg's name, custom data and variants), no entity data.
+        if let Some(child) = self.mobs.iter_mut().find(|m| m.id == id) {
+            horizon_client::entity_nbt::apply_item_components(child, &stack);
+        }
+        self.apply_spawn_egg_entity_data(id, &stack, false);
         if species == Species::Piglin {
             self.native_mobs_joined(self.mobs.len() - 1, false);
         }
@@ -6830,7 +6836,7 @@ impl Game<'_> {
         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
             horizon_client::entity_nbt::apply_item_components(m, stack);
         }
-        self.apply_spawn_egg_entity_data(id, stack);
+        self.apply_spawn_egg_entity_data(id, stack, true);
         self.post_block_game_event("minecraft:entity_place", p, Some(Who::Player), None);
         self.award_stat("used", &stack.item, 1);
         self.swing_arm();
@@ -6844,14 +6850,20 @@ impl Game<'_> {
         }
         Ok(true)
     }
-    /// `EntityType.createDefaultStackConfig` on the mob an egg spawned: the
-    /// egg's custom name (the whole text, style included) and custom data
-    /// (`Entity.applyImplicitComponent`, saved as `CustomName` and `data`),
-    /// then `EntityType.updateCustomEntityTag`: its `minecraft:entity_data`,
-    /// once the guards let it through, merged over the mob's own compound as
-    /// `TypedEntityData.loadInto` does and loaded back into the same mob
-    /// (`/data merge entity`'s loader).
-    pub(super) fn apply_spawn_egg_entity_data(&mut self, id: u32, stack: &ItemStack) {
+    /// `EntityType.createDefaultStackConfig` on the mob an egg or a bucket
+    /// spawned: the item's custom name (the whole text, style included) and
+    /// custom data (`Entity.applyImplicitComponent`, saved as `CustomName` and
+    /// `data`), then, with `entity_data`, `EntityType.updateCustomEntityTag`:
+    /// its `minecraft:entity_data`, once the guards let it through, merged
+    /// over the mob's own compound as `TypedEntityData.loadInto` does and
+    /// loaded back into the same mob (`/data merge entity`'s loader). An egg's
+    /// baby (`spawnOffspringFromSpawnEgg`) takes the components only.
+    pub(super) fn apply_spawn_egg_entity_data(
+        &mut self,
+        id: u32,
+        stack: &ItemStack,
+        entity_data: bool,
+    ) {
         use horizon_world::nbt::Tag;
         let Some(i) = self.mobs.iter().position(|m| m.id == id) else {
             return;
@@ -6863,7 +6875,8 @@ impl Game<'_> {
             .data()
             .and_then(|d| d.other("minecraft:custom_data"))
             .cloned();
-        let data = horizon_client::block_entity_item::spawn_egg_entity_data(stack, &kind, op);
+        let data = horizon_client::block_entity_item::spawn_egg_entity_data(stack, &kind, op)
+            .filter(|_| entity_data);
         if name.is_none() && custom.is_none() && data.is_none() {
             return;
         }

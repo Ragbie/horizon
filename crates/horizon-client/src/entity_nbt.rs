@@ -1482,14 +1482,12 @@ pub fn put_brain(map: &mut Compound, m: &Mob, dimension: &str) {
         Tag::compound([("memories", Tag::Compound(memories))]),
     );
 }
-/// `CustomName`: a text component saved as a string or a `{text: ..}` compound.
+/// `CustomName`: a text component saved as a string, a compound or a list,
+/// flattened as `Component.getString` does (`translate`, `extra`).
 fn custom_name(tag: &Tag) -> Option<String> {
     match tag.get("CustomName")? {
         Tag::String(s) => Some(s.to_string_lossy()),
-        t @ Tag::Compound(_) => match t.get("text") {
-            Some(Tag::String(s)) => Some(s.to_string_lossy()),
-            _ => None,
-        },
+        t @ (Tag::Compound(_) | Tag::List(_)) => Some(name_text(t).plain()),
         _ => None,
     }
 }
@@ -4173,6 +4171,36 @@ mod tests {
         assert_eq!(text(saved.get("CustomName")).as_deref(), Some("Tagged"));
     }
 
+    /// `Component.getString`: a compound or list name is flattened whole, so
+    /// `jeb_` written as `extra` still counts; a bucket keeps the styled name.
+    #[test]
+    fn a_compound_mob_name_flattens_and_a_bucket_keeps_its_style() {
+        let mut sheep = crate::mobs::sensor_scan_tests::kind();
+        Arc::make_mut(&mut sheep).id = "minecraft:sheep".into();
+        let types = [("minecraft:sheep".into(), sheep)].into();
+        let tag = Tag::compound([
+            ("id", string("minecraft:sheep")),
+            ("Pos", doubles(&[0.5, 64.0, 0.5])),
+            (
+                "CustomName",
+                Tag::compound([
+                    ("text", string("")),
+                    ("extra", Tag::List(vec![string("jeb"), string("_")])),
+                ]),
+            ),
+        ]);
+        let m = mob_from_nbt(&tag, &types, 1, None).unwrap();
+        assert_eq!(m.custom_name.as_deref(), Some("jeb_"));
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        Arc::make_mut(&mut kind).id = "minecraft:axolotl".into();
+        let mut fish = Mob::new(2, kind, Vec3::ZERO, 0.0);
+        let styled = Tag::compound([("text", string("Axo")), ("color", string("gold"))]);
+        fish.custom_name = Some("Axo".into());
+        fish.custom_name_text = Some(name_text(&styled));
+        let saved = bucket_components(&fish).custom_name.map(|t| name_text(&t));
+        assert_eq!(saved, Some(name_text(&styled)));
+    }
+
     #[test]
     fn other_mob_command_names_keep_their_type_and_custom_name() {
         use crate::mobs::Species;
@@ -5025,10 +5053,11 @@ pub fn bucket_data(m: &Mob) -> Tag {
 }
 pub fn bucket_components(m: &Mob) -> crate::item_data::StackData {
     let mut data = crate::item_data::StackData {
-        custom_name: m
-            .custom_name
-            .as_ref()
-            .map(|name| Tag::String(name.as_str().into())),
+        // Bucketable.saveDefaultDataToBucketTag: copyFrom(CUSTOM_NAME), whole.
+        custom_name: match (&m.custom_name_text, &m.custom_name) {
+            (Some(text), _) => Some(crate::scoreboard::json_to_tag(&text.component())),
+            (None, name) => name.as_ref().map(|name| Tag::String(name.as_str().into())),
+        },
         ..Default::default()
     };
     data.set_other("minecraft:bucket_entity_data", Some(bucket_data(m)));
