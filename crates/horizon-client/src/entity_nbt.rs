@@ -4163,7 +4163,10 @@ mod tests {
         assert_eq!(mob.command_name(), name_text(&styled));
         let raw = Tag::compound([("CustomName", string("Old"))]);
         let saved = mob_to_nbt(&mob, [0; 4], Some(&raw), None, |_| None);
-        assert_eq!(saved.get("CustomName").map(name_text), Some(name_text(&styled)));
+        assert_eq!(
+            saved.get("CustomName").map(name_text),
+            Some(name_text(&styled))
+        );
         assert!(matches!(saved.get("CustomName"), Some(Tag::Compound(_))));
         // A plain name keeps being saved as a string.
         mob.custom_name_text = None;
