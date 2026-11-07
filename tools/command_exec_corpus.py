@@ -975,6 +975,7 @@ def spawn_egg_stack_config():
     ops += [cmd('/data get entity @e[type=minecraft:pig,x=13.5,y=200,z=10.5,distance=..1,limit=1] NoAI')]
     ops += setup('/kill @e[type=minecraft:pig]', '/kill @e[type=minecraft:axolotl]', '/setblock 8 199 4 stone', '/fill 0 200 0 15 203 15 air',
                  '/gamemode survival', '/forceload remove 0 0 15 15')
+    return ops
 
 
 def enderman_command_damage():
