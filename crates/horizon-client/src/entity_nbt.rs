@@ -621,14 +621,9 @@ pub fn mob_to_nbt(
         ("Air", Tag::Short(m.air as i16)),
         ("Health", Tag::Float(m.health.max(0.0).to_bits())),
         ("AbsorptionAmount", Tag::Float(m.absorption.to_bits())),
-        (
-            "HurtTime",
-            Tag::Short(m.hurt_time.clamp(0, i32::from(i16::MAX)) as i16),
-        ),
-        (
-            "DeathTime",
-            Tag::Short(m.death_time.clamp(0, i32::from(i16::MAX)) as i16),
-        ),
+        // LivingEntity.addAdditionalSaveData: (short) casts, nothing clamped.
+        ("HurtTime", Tag::Short(m.hurt_time as i16)),
+        ("DeathTime", Tag::Short(m.death_time as i16)),
         // Mob.addAdditionalSaveData writes the current virtual getter, not raw input.
         ("CanPickUpLoot", Tag::Byte(i8::from(m.can_pick_up_loot()))),
         ("PersistenceRequired", Tag::Byte(i8::from(m.persistent))),
@@ -755,23 +750,7 @@ pub fn mob_to_nbt(
     } else if let Tag::Compound(map) = &mut tag {
         map.remove(&"CustomNameVisible".into());
     }
-    // A name from the save keeps its own shape unless it changed; a styled
-    // name (a name tag's, an egg's) is saved whole.
-    match (&m.custom_name_text, &m.custom_name) {
-        (Some(text), _) => {
-            if !tag.get("CustomName").is_some_and(|t| name_text(t) == *text) {
-                put(
-                    &mut tag,
-                    "CustomName",
-                    crate::scoreboard::json_to_tag(&text.component()),
-                );
-            }
-        }
-        (None, Some(name)) if custom_name(&tag) != m.custom_name => {
-            put(&mut tag, "CustomName", Tag::String(name.as_str().into()));
-        }
-        _ => {}
-    }
+    names::put_mob_custom_name(&mut tag, m);
     let Tag::Compound(map) = &mut tag else {
         return tag;
     };
@@ -3688,6 +3667,7 @@ pub fn firework_rocket_to_nbt(r: &RocketSave, uuid: [i32; 4], raw: Option<&Tag>)
     tag
 }
 
+mod names;
 mod trident;
 pub use trident::{TRIDENT_HIT_GROUND, TridentNbt, TridentSave, trident_from_nbt, trident_to_nbt};
 
@@ -6438,11 +6418,7 @@ pub fn bucket_data(m: &Mob) -> Tag {
 }
 pub fn bucket_components(m: &Mob) -> crate::item_data::StackData {
     let mut data = crate::item_data::StackData {
-        // Bucketable.saveDefaultDataToBucketTag: copyFrom(CUSTOM_NAME), whole.
-        custom_name: match (&m.custom_name_text, &m.custom_name) {
-            (Some(text), _) => Some(crate::scoreboard::json_to_tag(&text.component())),
-            (None, name) => name.as_ref().map(|name| Tag::String(name.as_str().into())),
-        },
+        custom_name: names::bucket_custom_name(m),
         ..Default::default()
     };
     data.set_other("minecraft:bucket_entity_data", Some(bucket_data(m)));

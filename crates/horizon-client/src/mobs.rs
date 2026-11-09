@@ -2684,14 +2684,10 @@ impl Seen {
     }
 }
 impl Mob {
-    /// The name used by command replies: CustomName (its whole text, style
-    /// included) takes precedence over the type.
+    /// The name used by command replies: CustomName, style and all, comes before the type.
     pub fn command_name(&self) -> crate::text::Text {
-        if let Some(text) = &self.custom_name_text {
-            return text.clone();
-        }
         if let Some(name) = &self.custom_name {
-            return crate::text::Text::literal(name);
+            return (self.custom_name_text.clone()).unwrap_or_else(|| crate::text::Text::literal(name));
         }
         // Villager.getTypeName returns its registered profession's name.
         if self.species() == Species::Villager {
