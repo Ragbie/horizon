@@ -333,35 +333,25 @@ impl ThrownTrident {
         let from = self.position;
         self.position = to;
         // applyEffectsFromBlocks' honey (HoneyBlock.entityInside) along the
-        // move: the cells the box covered from start to end (deflated 1e-5).
-        let (lo, hi) = (
-            Vec3::new(
-                from.x.min(to.x) - HALF,
-                from.y.min(to.y),
-                from.z.min(to.z) - HALF,
-            ),
-            Vec3::new(
-                from.x.max(to.x) + HALF,
-                from.y.max(to.y) + 2.0 * HALF,
-                from.z.max(to.z) + HALF,
-            ),
-        );
-        let e = 1.0e-5;
-        for x in (lo.x + e).floor() as i32..=(hi.x - e).floor() as i32 {
-            for y in (lo.y + e).floor() as i32..=(hi.y - e).floor() as i32 {
-                for z in (lo.z + e).floor() as i32..=(hi.z - e).floor() as i32 {
-                    if w.honey([x, y, z])
-                        && let Some(v) = horizon_client::projectiles::honey_slide(
-                            self.velocity,
-                            to,
-                            self.on_ground,
-                            2.0 * HALF,
-                            [x, y, z],
-                        )
-                    {
-                        self.velocity = v;
-                    }
-                }
+        // move: the cells the final box (deflated by 1e-5F) swept through.
+        let eps = f64::from(1.0e-5_f32);
+        let bounds = Aabb::new(
+            Vec3::new(to.x - HALF, to.y, to.z - HALF),
+            Vec3::new(to.x + HALF, to.y + 2.0 * HALF, to.z + HALF),
+        )
+        .deflate(Vec3::new(eps, eps, eps));
+        for p in horizon_client::projectiles::swept_cells(from, to, bounds) {
+            let cell = [p.x, p.y, p.z];
+            if w.honey(cell)
+                && let Some(v) = horizon_client::projectiles::honey_slide(
+                    self.velocity,
+                    to,
+                    self.on_ground,
+                    2.0 * HALF,
+                    cell,
+                )
+            {
+                self.velocity = v;
             }
         }
         // A trident's water inertia (0.99) equals the air drag, a float in
@@ -1578,6 +1568,16 @@ mod tests {
         assert_eq!(
             far.velocity,
             Vec3::new(0.0, -0.6 * f64::from(0.99f32) - 0.05, 0.0)
+        );
+        // A diagonal move whose enclosing box holds the honey column but whose
+        // swept box never touches it (review on #14674): no slide.
+        let mut diagonal = ThrownTrident::remote(1, Vec3::new(5.5, 209.5, 6.5), 0.0, 0.0);
+        diagonal.velocity = Vec3::new(4.0, -0.5, 4.0);
+        diagonal.remote_tick(&Honey, None);
+        let drag = f64::from(0.99f32);
+        assert_eq!(
+            diagonal.velocity,
+            Vec3::new(4.0 * drag, -0.5 * drag - 0.05, 4.0 * drag)
         );
     }
 

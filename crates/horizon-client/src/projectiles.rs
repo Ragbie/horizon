@@ -70,6 +70,49 @@ pub fn thrown_by_item(item: &str) -> Option<&'static ThrownType> {
     thrown_types().iter().find(|t| t.item == item)
 }
 
+/// The blocks `Entity.checkInsideBlocks` visits for a move from `from` to `to`
+/// (`BlockGetter.forEachBlockIntersectedBetween`): the cells the deflated
+/// final box `deflated` swept through, each once, in the sweep's order. A
+/// sweep that used all 16 steps checks the end position once more.
+pub fn swept_cells(from: Vec3, to: Vec3, deflated: Aabb) -> Vec<BlockPos> {
+    let mut cells: Vec<BlockPos> = Vec::new();
+    let mut used = 0;
+    let _ = horizon_core::geometry::sweep_intersected_blocks(
+        from,
+        to,
+        deflated,
+        1_000_000,
+        |p, step| {
+            if step >= 16 {
+                return false;
+            }
+            used = step;
+            if !cells.contains(&p) {
+                cells.push(p);
+            }
+            true
+        },
+    );
+    if used + 1 >= 16 {
+        let _ = horizon_core::geometry::sweep_intersected_blocks(
+            to,
+            to,
+            deflated,
+            1_000_000,
+            |p, step| {
+                if step >= 1 {
+                    return false;
+                }
+                if !cells.contains(&p) {
+                    cells.push(p);
+                }
+                true
+            },
+        );
+    }
+    cells
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ProjectileKind {
     /// Arrow with its base damage, critical flag and tipped/stray/bogged effect.
@@ -1290,43 +1333,8 @@ impl Projectile {
         let eps = f64::from(1.0e-5_f32);
         let deflated = self.bounds().deflate(Vec3::new(eps, eps, eps));
         let far = from.distance_squared(to) > 0.999_990_000_000_252_6f64 * 0.999_990_000_000_252_6;
-        let mut cells = Vec::new();
-        let mut used = 0;
-        let _ = horizon_core::geometry::sweep_intersected_blocks(
-            from,
-            to,
-            deflated,
-            1_000_000,
-            |p, step| {
-                if step >= 16 {
-                    return false;
-                }
-                used = step;
-                cells.push(p);
-                true
-            },
-        );
-        // A sweep that used all 16 steps checks the end position once more.
-        if used + 1 >= 16 {
-            let _ = horizon_core::geometry::sweep_intersected_blocks(
-                to,
-                to,
-                deflated,
-                1_000_000,
-                |p, step| {
-                    if step >= 1 {
-                        return false;
-                    }
-                    cells.push(p);
-                    true
-                },
-            );
-        }
-        // Each block once, in the sweep's order: a handful of cells, no set.
-        for (i, &p) in cells.iter().enumerate() {
-            if cells[..i].contains(&p) {
-                continue;
-            }
+        // Each block once, in the sweep's order.
+        for p in swept_cells(from, to, deflated) {
             if honey([p.x, p.y, p.z]) {
                 if self.honey_slide([p.x, p.y, p.z]) {
                     self.fall_distance = 0.0;
