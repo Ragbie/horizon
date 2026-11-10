@@ -611,9 +611,13 @@ impl Game<'_> {
             Some(self.border.geometry()),
             Some(&self.res.motion().blocks),
         );
-        item.check_fall(&step, |fall, from, moved| {
+        let landed = item.check_fall(&step, |fall, from, moved| {
             self.vehicle_fall_reset(fall, from, moved)
         });
+        // Entity.checkFallDamage: the block it lands on runs fallOn.
+        if let Some(fall) = landed.filter(|_| !client) {
+            self.non_living_fall_on(item.id, item.position, item.bounds(), fall);
+        }
         if let Some(pos) = step.vertical_contact {
             let state = self.world.block(pos.x, pos.y, pos.z);
             let position = item.position;

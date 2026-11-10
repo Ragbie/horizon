@@ -168,6 +168,54 @@ fn a_falling_rocket_hits_the_ground_and_one_in_water_splashes() {
         );
     });
 }
+/// Primed TNT that falls onto a block runs its `Block.fallOn`, though it isn't
+/// living: honey plays its slide sound (`HoneyBlock.fallOn`), and farmland
+/// draws one float from the level random (`FarmlandBlock.fallOn`, before its
+/// LivingEntity check); stone does neither.
+#[test]
+#[ignore = "prepared resources; actual registered load, Game tick and posted events"]
+fn primed_tnt_landing_runs_the_blocks_fall_on() {
+    with_game(|game| {
+        let slide = "minecraft:block.honey_block.slide";
+        for (block, slides, draws) in [("stone", 0, 0), ("honey_block", 1, 0), ("farmland", 0, 1)] {
+            assert!(game.run_command(&format!("setblock 6 200 10 {block}")));
+            game.tnts.clear();
+            game.add_primed_tnt(
+                horizon_core::position::BlockPos::new(6, 203, 10),
+                0.0,
+                80,
+                None,
+                None,
+            );
+            game.tnts[0].velocity = Vec3::ZERO;
+            game.audio.heard.clear();
+            let mut expected = game.world.random.clone();
+            for _ in 0..draws {
+                expected.next_float();
+            }
+            let mut landed = false;
+            for _ in 0..40 {
+                game.tick_one_tnt(0, &[]).unwrap();
+                if game.tnts[0].on_ground {
+                    landed = true;
+                    break;
+                }
+            }
+            assert!(landed, "the TNT lands on {block}");
+            assert_eq!(
+                game.audio.heard.get(slide).copied().unwrap_or(0),
+                slides,
+                "{block}"
+            );
+            let (mut after, mut want) = (game.world.random.clone(), expected);
+            assert_eq!(
+                after.next_long(),
+                want.next_long(),
+                "{block}: one draw per farmland landing"
+            );
+        }
+    });
+}
 #[test]
 #[ignore = "prepared resources; actual registered load, Game tick and posted events"]
 fn loaded_arrow_first_tick_dispatches_once_with_its_real_owner() {
