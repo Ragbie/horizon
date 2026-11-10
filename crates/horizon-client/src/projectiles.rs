@@ -1731,10 +1731,17 @@ mod tests {
         );
         assert_eq!(
             snowball(6.1, Vec3::new(0.1, -0.6, 0.05)).0,
-            Vec3::new(0.008896020724866017, -0.12740000247955321, 0.004448010362433009)
+            Vec3::new(
+                0.008896020724866017,
+                -0.12740000247955321,
+                0.004448010362433009
+            )
         );
         let air = f64::from(0.99_f32);
-        assert_eq!(snowball(6.1, Vec3::ZERO).0, Vec3::new(0.0, -0.03 * air, 0.0));
+        assert_eq!(
+            snowball(6.1, Vec3::ZERO).0,
+            Vec3::new(0.0, -0.03 * air, 0.0)
+        );
         // Its box (0.25 wide) no longer reaches the honey's cell.
         assert_eq!(
             snowball(6.2, Vec3::new(0.0, -0.5, 0.0)).0,

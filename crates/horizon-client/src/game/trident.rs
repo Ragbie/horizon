@@ -335,8 +335,16 @@ impl ThrownTrident {
         // applyEffectsFromBlocks' honey (HoneyBlock.entityInside) along the
         // move: the cells the box covered from start to end (deflated 1e-5).
         let (lo, hi) = (
-            Vec3::new(from.x.min(to.x) - HALF, from.y.min(to.y), from.z.min(to.z) - HALF),
-            Vec3::new(from.x.max(to.x) + HALF, from.y.max(to.y) + 2.0 * HALF, from.z.max(to.z) + HALF),
+            Vec3::new(
+                from.x.min(to.x) - HALF,
+                from.y.min(to.y),
+                from.z.min(to.z) - HALF,
+            ),
+            Vec3::new(
+                from.x.max(to.x) + HALF,
+                from.y.max(to.y) + 2.0 * HALF,
+                from.z.max(to.z) + HALF,
+            ),
         );
         let e = 1.0e-5;
         for x in (lo.x + e).floor() as i32..=(hi.x - e).floor() as i32 {
@@ -829,19 +837,20 @@ impl Game<'_> {
             let (fire_ticks, facts) = (t.fire_ticks, scene.facts);
             // HoneyBlock.entityInside, at the end of the move; a trident keeps
             // no fall to reset.
-            let (ticks, extinguished) = scene.apply_block_effects(from, to, fire_ticks, |state, p, _| {
-                if &*facts.get(state).name == "minecraft:honey_block"
-                    && let Some(v) = horizon_client::projectiles::honey_slide(
-                        t.velocity,
-                        to,
-                        t.on_ground,
-                        0.5,
-                        [p.x, p.y, p.z],
-                    )
-                {
-                    t.velocity = v;
-                }
-            });
+            let (ticks, extinguished) =
+                scene.apply_block_effects(from, to, fire_ticks, |state, p, _| {
+                    if &*facts.get(state).name == "minecraft:honey_block"
+                        && let Some(v) = horizon_client::projectiles::honey_slide(
+                            t.velocity,
+                            to,
+                            t.on_ground,
+                            0.5,
+                            [p.x, p.y, p.z],
+                        )
+                    {
+                        t.velocity = v;
+                    }
+                });
             t.fire_ticks = ticks;
             extinguished
         };
@@ -1566,7 +1575,10 @@ mod tests {
         let mut far = ThrownTrident::remote(1, Vec3::new(6.4, 209.0, 10.5), 0.0, 0.0);
         far.velocity = Vec3::new(0.0, -0.6, 0.0);
         far.remote_tick(&Honey, None);
-        assert_eq!(far.velocity, Vec3::new(0.0, -0.6 * f64::from(0.99f32) - 0.05, 0.0));
+        assert_eq!(
+            far.velocity,
+            Vec3::new(0.0, -0.6 * f64::from(0.99f32) - 0.05, 0.0)
+        );
     }
 
     #[test]
