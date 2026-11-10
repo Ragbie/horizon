@@ -216,6 +216,36 @@ fn primed_tnt_landing_runs_the_blocks_fall_on() {
         }
     });
 }
+/// `FallingBlockEntity.causeFallDamage`: an anvil that hurts something wears
+/// by `this.random`, its own random; the level random is left alone (the
+/// farmland it may land on draws from that one).
+#[test]
+#[ignore = "prepared resources; actual registered load, Game tick and posted events"]
+fn an_anvils_wear_leaves_the_level_random_alone() {
+    with_game(|game| {
+        assert!(game.run_command(
+            "summon husk 6.5 200 10.5 {NoAI:1b,Silent:1b,attributes:[{id:\"minecraft:max_health\",base:100d}],Health:100f}"
+        ));
+        assert!(game.run_command(
+            "summon falling_block 6.5 200 10.5 {BlockState:{id:\"minecraft:anvil\"},Time:1,HurtEntities:1b,FallHurtAmount:2f,FallHurtMax:40}"
+        ));
+        let registry = game.pack.assets.registry;
+        let mut anvil = game.falling.last().unwrap().clone();
+        anvil.state = registry.default_state("minecraft:anvil").unwrap();
+        let mut level = game.world.random.clone();
+        game.falling_block_impact(&mut anvil, 30.0);
+        // A fall of 30 wears it for sure (0.05 + 29 * 0.05 > 1).
+        let chipped = registry.default_state("minecraft:chipped_anvil");
+        assert_eq!(Some(anvil.state), chipped, "the anvil wore");
+        let husk = game
+            .mobs
+            .iter()
+            .find(|m| m.species() == horizon_client::mobs::Species::Husk)
+            .unwrap();
+        assert!(husk.health < 100.0, "the anvil hit the husk");
+        assert_eq!(game.world.random.clone().next_long(), level.next_long());
+    });
+}
 #[test]
 #[ignore = "prepared resources; actual registered load, Game tick and posted events"]
 fn loaded_arrow_first_tick_dispatches_once_with_its_real_owner() {

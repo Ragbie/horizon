@@ -251,9 +251,11 @@ impl Game<'_> {
                     self.lan = Some(host);
                 }
             }
+            // `this.random.nextFloat()`: the falling block's own (unseeded)
+            // random, not the level's.
             if anvil
                 && impact.wear_chance > 0.0
-                && self.world.random.next_float() < impact.wear_chance
+                && horizon_client::random_source::entity().next_float() < impact.wear_chance
                 && let Some(mut state) = self.pack.assets.registry.state(block.state).cloned()
             {
                 if falling_block::wear_anvil(&mut state) {

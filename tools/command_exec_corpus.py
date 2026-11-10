@@ -7376,7 +7376,7 @@ def falling_block_fall_on():
         ops.append(cmd(f'/summon husk {x}.5 {top} {z0 + 8}.5 {{UUID:[I;19000,0,{n},1],NoAI:1b,Silent:1b,'
                        'PersistenceRequired:1b,attributes:[{id:"minecraft:max_health",base:100d}],Health:100f,'
                        'equipment:{feet:{id:"minecraft:leather_boots",count:1}}}', expect_result=1))
-        ops.append(cmd(f'/summon falling_block {x}.5 {y0 + 10} {z0 + 8}.5 {{BlockState:{{Name:"minecraft:anvil"}},'
+        ops.append(cmd(f'/summon falling_block {x}.5 {y0 + 10} {z0 + 8}.5 {{BlockState:{{id:"minecraft:anvil"}},'
                        'Time:1,HurtEntities:1b,FallHurtAmount:2f,FallHurtMax:40}', expect_result=1))
     ops.append(cmd('/tick unfreeze', False))
     ops.append({'op': 'tick', 'n': 40})
