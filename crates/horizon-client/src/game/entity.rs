@@ -247,6 +247,11 @@ pub(super) trait Entity: EntityRules {
     fn portal_size(&self) -> Option<(f32, f32)> {
         None
     }
+    /// Whether [`Self::portal_size`] is Some, without working the size out (a
+    /// mob's depends on its age, scale and pose).
+    fn sweeps_portals(&self) -> bool {
+        self.portal_size().is_some()
+    }
     /// `Entity.canUsePortal(false)` for a kind in `portal_size`. A kind that
     /// cannot stays tracked, so its cooldown and process run out.
     fn can_use_portal(&self, _game: &Game<'_>) -> bool {
@@ -255,6 +260,14 @@ pub(super) trait Entity: EntityRules {
     /// A boat or minecart: the kinds whose portal pass opens the tick, before
     /// they move (`AbstractMinecart.tick` handles its portal first).
     fn is_vehicle(&self) -> bool {
+        false
+    }
+    /// `Entity.getDimensionChangingDelay`, overridden by vehicles and projectiles.
+    fn dimension_changing_delay(&self) -> i32 {
+        horizon_client::nether_portal::ENTITY_DELAY
+    }
+    /// Whether movement applies portal block effects before Entity's base tick.
+    fn portal_after_move(&self) -> bool {
         false
     }
     /// Where it stood at the start of its tick, for the kinds that store it
@@ -318,7 +331,14 @@ impl RenderEntityBounds for Mob {
             self.species(),
             Species::Guardian | Species::ElderGuardian | Species::Phantom
         ) {
-            let radius = width.max(height) * 2.5 + 3.0;
+            // The model's root scales its appendages too (the elder guardian
+            // uses 2.35), so the margin must grow along with the model.
+            let root_scale = self.kind.model.pose[6..]
+                .iter()
+                .copied()
+                .map(f32::abs)
+                .fold(1.0, f32::max);
+            let radius = width.max(height) * 2.5 + 3.0 * f64::from(root_scale * self.model_scale());
             return Aabb::of_size(at, Vec3::new(radius * 2.0, radius * 2.0, radius * 2.0));
         }
 
@@ -581,8 +601,9 @@ macro_rules! stored_motion {
 }
 
 impl Game<'_> {
-    /// Tick an item owned by the caller. The two results are ordinary survival
-    /// and explicit consumption by a block-contact handler. `escape_speed`:
+    /// Tick an item owned by the caller. The results are ordinary survival,
+    /// explicit consumption by a block-contact handler, and the fall it landed
+    /// with on a server (its block's `fallOn` is the caller's). `escape_speed`:
     /// the item is inside a block and moves without physics this tick, pushed
     /// out at this speed.
     pub(super) fn tick_item_with_block_contacts(
@@ -592,32 +613,12 @@ impl Game<'_> {
         entity_boxes: &[Aabb],
         client: bool,
         splash: &mut impl FnMut(horizon_client::entities::ItemSplash),
-    ) -> (bool, bool) {
+    ) -> (bool, bool, super::item_entities::ahead::Landed) {
         let no_physics = escape_speed.is_some();
-        // Entity.baseTick splashes before moving, except on the first tick, at
-        // the motion before the currents push it.
-        let before = item.velocity;
-        let heights = item.push_by_fluid(&self.world, &self.res.motion().fluids);
-        item.water_entry(heights.0 > 0.0, item.ticks == 0, before, splash);
-        item.lava_fall(heights.1 > 0.0);
-        let step = item.tick_move_before_block_effects(
-            &self.world,
-            self.res.facts(),
-            self.collision,
-            no_physics,
-            escape_speed,
-            heights,
-            entity_boxes,
-            Some(self.border.geometry()),
-            Some(&self.res.motion().blocks),
-        );
-        let landed = item.check_fall(&step, |fall, from, moved| {
-            self.vehicle_fall_reset(fall, from, moved)
-        });
-        // Entity.checkFallDamage: the block it lands on runs fallOn.
-        if let Some(fall) = landed.filter(|_| !client) {
-            self.non_living_fall_on(item.id, item.position, item.bounds(), fall);
-        }
+        let (step, landed) = self
+            .item_tables()
+            .move_item(item, escape_speed, entity_boxes, splash);
+        let landed = landed.filter(|_| !client);
         if let Some(pos) = step.vertical_contact {
             let state = self.world.block(pos.x, pos.y, pos.z);
             let position = item.position;
@@ -633,28 +634,13 @@ impl Game<'_> {
                 &mut discarded,
             );
             if discarded || item.stack.count == 0 {
-                return (false, true);
+                return (false, true, landed);
             }
         }
-        item.finish_move_block_effects(
-            &self.world,
-            self.res.facts(),
-            no_physics,
-            Some(&self.res.motion().blocks),
-            step,
-        );
-        item.push_by_bubble_column(
-            &self.world,
-            self.pack.assets.registry,
-            self.res.facts(),
-            self.collision,
-        );
-        let alive = item.tick_settle(&self.world, self.res.facts(), no_physics, step);
-        // ItemEntity.tick refreshes immersion and splashes on water entry.
-        let before = item.velocity;
-        let (water, _) = item.push_by_fluid(&self.world, &self.res.motion().fluids);
-        item.water_entry(water > 0.0, false, before, splash);
-        (alive, false)
+        let alive = self
+            .item_tables()
+            .settle_item(item, no_physics, step, splash);
+        (alive, false, landed)
     }
 
     /// Keep new joins after the active batch, so they tick next time.
@@ -1112,6 +1098,9 @@ impl Entity for Mob {
     fn portal_size(&self) -> Option<(f32, f32)> {
         Some((self.width(), self.height()))
     }
+    fn sweeps_portals(&self) -> bool {
+        true
+    }
     fn can_use_portal(&self, game: &Game<'_>) -> bool {
         game.mob_can_use_portal(self)
     }
@@ -1321,6 +1310,9 @@ impl Entity for ExperienceOrb {
 }
 
 impl Entity for Boat {
+    fn dimension_changing_delay(&self) -> i32 {
+        10
+    }
     fn set_on_ground(&mut self, on_ground: bool) {
         self.on_ground = on_ground;
     }
@@ -1396,6 +1388,9 @@ impl Entity for Boat {
 }
 
 impl Entity for Minecart {
+    fn dimension_changing_delay(&self) -> i32 {
+        10
+    }
     fn set_on_ground(&mut self, on_ground: bool) {
         self.on_ground = on_ground;
     }
@@ -1722,6 +1717,16 @@ impl Entity for FallingBlock {
 }
 
 impl Entity for Projectile {
+    fn portal_after_move(&self) -> bool {
+        !matches!(
+            self.kind,
+            horizon_client::projectiles::ProjectileKind::LlamaSpit
+                | horizon_client::projectiles::ProjectileKind::ShulkerBullet { .. }
+        )
+    }
+    fn dimension_changing_delay(&self) -> i32 {
+        2
+    }
     fn rotation(&self) -> [f32; 2] {
         [self.yaw, self.pitch]
     }
@@ -1842,6 +1847,9 @@ impl Entity for Projectile {
 }
 
 impl Entity for Rocket {
+    fn dimension_changing_delay(&self) -> i32 {
+        2
+    }
     fn rotation(&self) -> [f32; 2] {
         self.rotation
     }
@@ -1909,6 +1917,12 @@ impl Entity for Rocket {
 }
 
 impl Entity for ThrownTrident {
+    fn portal_after_move(&self) -> bool {
+        true
+    }
+    fn dimension_changing_delay(&self) -> i32 {
+        2
+    }
     fn rotation(&self) -> [f32; 2] {
         [self.yaw, self.pitch]
     }
@@ -2262,6 +2276,7 @@ mod set_rotation_tests {
     #[test]
     fn set_rotation_keeps_yaw_and_clamps_pitch_on_kinds_that_had_none() {
         let mut orb = ExperienceOrb {
+            fall_distance: 0.0,
             join: Default::default(),
             no_gravity: false,
             id: 0,
@@ -2274,6 +2289,7 @@ mod set_rotation_tests {
             count: 1,
             ticks: 0,
             health: 5,
+            air: 300,
             rotation: [0.0, 0.0],
             following: None,
         };

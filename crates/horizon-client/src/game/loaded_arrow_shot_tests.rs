@@ -5,11 +5,7 @@ use horizon_client::{
     motion::PlayerMotion,
     projectiles::{Projectile, ProjectileKind},
 };
-use horizon_core::{
-    geometry::Vec3,
-    position::ChunkPos,
-    random::{LegacyRandom, RandomSource},
-};
+use horizon_core::{geometry::Vec3, position::ChunkPos, random::RandomSource};
 use std::sync::Arc;
 fn with_game(test: impl FnOnce(&mut Game<'_>)) {
     let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
@@ -66,7 +62,7 @@ fn with_game(test: impl FnOnce(&mut Game<'_>)) {
     game.creative = true;
     assert!(game.run_command("fill 0 199 0 31 199 31 stone"));
     assert!(game.run_command("summon pig 13.5 200 2.5 {UUID:[I;114,0,0,99],NoAI:1b,NoGravity:1b}"));
-    game.world.random = LegacyRandom::new(114);
+    game.world.random.set_seed(114);
     test(&mut game);
 }
 fn start_events() {
@@ -124,6 +120,104 @@ fn a_rocket_posts_its_shot_once_and_a_silent_one_launches_quietly() {
         assert!(game.rockets.iter().all(|r| r.has_been_shot));
         // Only the rocket that isn't silent launches with a sound.
         assert_eq!(game.audio.heard.get(launch), Some(&1));
+    });
+}
+/// #14440: an orb's move adds its drop to the fall outside water; landing
+/// after a fall posts HIT_GROUND and forgets the fall (`Entity.checkFallDamage`);
+/// in water the drop adds nothing, so a landing posts nothing.
+#[test]
+#[ignore = "prepared resources; actual registered load, Game tick and posted events"]
+fn a_landing_orb_posts_hit_ground_after_a_fall() {
+    use horizon_client::entities::OrbMove;
+    with_game(|game| {
+        assert!(game.run_command("summon experience_orb 6.5 200 10.5 {Value:1,fall_distance:2d}"));
+        let i = game.orbs.len() - 1;
+        let from = Vec3::new(6.5, 200.5, 10.5);
+        let down = Vec3::new(0.0, -0.5, 0.0);
+        start_events();
+        // In the air: the drop adds to the fall.
+        game.orbs[i].on_ground = false;
+        game.orb_moved(
+            i,
+            OrbMove {
+                from,
+                moved: down,
+                in_water: false,
+            },
+        );
+        assert_eq!(game.orbs[i].fall_distance, 2.5);
+        // On the ground: HIT_GROUND, then the fall is gone.
+        game.orbs[i].on_ground = true;
+        game.orb_moved(
+            i,
+            OrbMove {
+                from,
+                moved: down,
+                in_water: false,
+            },
+        );
+        assert_eq!(game.orbs[i].fall_distance, 0.0);
+        // In water with no fall: no drop, so no landing event.
+        game.orb_moved(
+            i,
+            OrbMove {
+                from,
+                moved: down,
+                in_water: true,
+            },
+        );
+        let events: Vec<_> = crate::game::sculk::TEST_POSTED_EVENTS.with(|v| {
+            std::mem::take(v.borrow_mut().as_mut().unwrap())
+                .into_iter()
+                .filter(|e| e.0 == "minecraft:hit_ground")
+                .collect()
+        });
+        stop_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(game.orbs[i].fall_distance, 0.0);
+    });
+}
+/// `Entity.checkFallDamage`: an orb landing after a fall runs the block's
+/// `fallOn` before HIT_GROUND: honey slides (its sound), farmland draws one
+/// level float (before its LivingEntity check); stone does neither.
+#[test]
+#[ignore = "prepared resources; actual registered load, Game tick and posted events"]
+fn a_landing_orb_runs_the_blocks_fall_on() {
+    use horizon_client::entities::OrbMove;
+    with_game(|game| {
+        let slide = "minecraft:block.honey_block.slide";
+        for (block, slides, draws) in [("stone", 0, 0), ("honey_block", 1, 0), ("farmland", 0, 1)] {
+            assert!(game.run_command(&format!("setblock 6 200 10 {block}")));
+            game.orbs.clear();
+            assert!(
+                game.run_command("summon experience_orb 6.5 201 10.5 {Value:1,fall_distance:2d}")
+            );
+            game.orbs[0].on_ground = true;
+            game.audio.heard.clear();
+            let mut expected = game.world.random.clone();
+            for _ in 0..draws {
+                expected.next_float();
+            }
+            game.orb_moved(
+                0,
+                OrbMove {
+                    from: Vec3::new(6.5, 201.5, 10.5),
+                    moved: Vec3::new(0.0, -0.5, 0.0),
+                    in_water: false,
+                },
+            );
+            assert_eq!(game.orbs[0].fall_distance, 0.0);
+            assert_eq!(
+                game.audio.heard.get(slide).copied().unwrap_or(0),
+                slides,
+                "{block}"
+            );
+            assert_eq!(
+                game.world.random.clone().next_long(),
+                expected.next_long(),
+                "{block}: one draw per farmland landing"
+            );
+        }
     });
 }
 /// #14318: an angled rocket falling onto stone builds up its fall and posts
