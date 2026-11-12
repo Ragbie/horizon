@@ -220,6 +220,43 @@ fn a_landing_orb_runs_the_blocks_fall_on() {
         }
     });
 }
+/// `ItemEntity.tick`: an item that drops through water onto honey in one tick
+/// slides (`HoneyBlock.fallOn`, during `Entity.move`) before it splashes
+/// (`updateFluidInteraction`'s water entry, after the move).
+#[test]
+#[ignore = "prepared resources; actual registered load, Game tick and posted events"]
+fn an_item_dropping_through_water_onto_honey_slides_before_it_splashes() {
+    with_game(|game| {
+        assert!(game.run_command("setblock 6 200 10 honey_block"));
+        assert!(game.run_command("setblock 6 201 10 water"));
+        game.dropped.clear();
+        game.spawn_item(
+            crate::items::ItemStack::new("minecraft:stone", 1),
+            [6.5, 202.05, 10.5],
+            [0.0, -1.2, 0.0],
+            10,
+        );
+        game.dropped[0].ticks = 1;
+        game.ticked_entities_through = u32::MAX;
+        game.audio.capture = Some(Vec::new());
+        game.tick_items();
+        let sounds = game.audio.capture.take().unwrap();
+        let order: Vec<&str> = sounds
+            .iter()
+            .map(|s| &*s.event)
+            .filter(|e| *e == "minecraft:block.honey_block.slide" || e.ends_with(".splash"))
+            .collect();
+        assert_eq!(
+            order,
+            [
+                "minecraft:block.honey_block.slide",
+                "minecraft:entity.generic.splash"
+            ],
+            "{sounds:?} at {:?}",
+            game.dropped.first().map(|i| i.position)
+        );
+    });
+}
 /// #14318: an angled rocket falling onto stone builds up its fall and posts
 /// HIT_GROUND when it lands (`Entity.checkFallDamage`); one falling into water
 /// splashes once (`Entity.doWaterSplashEffect`: the sound and SPLASH) and lands

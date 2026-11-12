@@ -58,7 +58,11 @@ impl ItemTables<'_> {
         // the motion before the currents push it.
         let before = item.velocity;
         let heights = item.push_by_fluid(self.world, &self.motion.fluids);
-        item.water_entry(heights.0 > 0.0, item.ticks == 0, before, splash);
+        let mut splashed = 0;
+        item.water_entry(heights.0 > 0.0, item.ticks == 0, before, &mut |s| {
+            splashed += 1;
+            splash(s);
+        });
         item.lava_fall(heights.1 > 0.0);
         let step = item.tick_move_before_block_effects(
             self.world,
@@ -75,7 +79,7 @@ impl ItemTables<'_> {
             .check_fall(&step, |fall, from, moved| {
                 fall_reset(self.world, self.motion, self.facts, fall, from, moved)
             })
-            .map(|fall| (fall, item.position, item.bounds()));
+            .map(|fall| (fall, item.position, item.bounds(), splashed));
         (step, landed)
     }
     /// The rest of the move after its vertical contact: block effects, bubble columns, settling
@@ -116,10 +120,11 @@ pub(super) fn reach(item: &ItemEntity) -> Aabb {
 /// splashes, and where it landed.
 pub(super) type Moved = (bool, bool, bool, Vec<ItemSplash>, Landed);
 
-/// `Entity.checkFallDamage`'s landing: the fall, the item's position and box. The block it lands
-/// on runs `fallOn` at the item's turn, as it can change the level (its random, sounds): a move
-/// worked out ahead leaves the level alone.
-pub(in crate::game) type Landed = Option<(f64, Vec3, Aabb)>;
+/// `Entity.checkFallDamage`'s landing: the fall, the item's position and box, and how many of the
+/// tick's splashes came before it (`Entity.baseTick`'s; the water entry after the move comes
+/// after). The block it lands on runs `fallOn` at the item's turn, as it can change the level
+/// (its random, sounds): a move worked out ahead leaves the level alone.
+pub(in crate::game) type Landed = Option<(f64, Vec3, Aabb, usize)>;
 
 /// One item's move, worked out on a copy.
 pub(super) struct Ahead {

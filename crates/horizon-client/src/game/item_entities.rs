@@ -110,14 +110,19 @@ impl Game<'_> {
                     None => at_turn(item),
                 };
             // Entity.doWaterSplashEffect: the server plays the sound (broadcast
-            // to clients). Its addParticle is empty.
-            for splash in entered {
+            // to clients). Its addParticle is empty. Entity.checkFallDamage
+            // runs the landing block's fallOn during the move: after baseTick's
+            // splash, before the water entry after the move.
+            let before_landing = landed.map_or(entered.len(), |l| l.3);
+            let mut entered = entered.into_iter();
+            for splash in entered.by_ref().take(before_landing) {
                 self.apply_item_splash(splash);
             }
-            // Entity.checkFallDamage, after baseTick's splash: the block it
-            // landed on runs fallOn.
-            if let Some((fall, at, bounds)) = landed {
+            if let Some((fall, at, bounds, _)) = landed {
                 self.non_living_fall_on(item.id, at, bounds, fall);
+            }
+            for splash in entered {
+                self.apply_item_splash(splash);
             }
             if discarded {
                 removed[i] = true;
