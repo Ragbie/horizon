@@ -66,18 +66,18 @@ pub fn loaded_motion(tag: &Tag) -> Vec3 {
 pub fn rotation(tag: &Tag) -> [f32; 2] {
     read_doubles::<2>(tag.get("Rotation")).map_or([0.0; 2], |r| [r[0] as f32, r[1] as f32])
 }
-/// `Entity.load`'s `setYRot` and `setXRot` on a fresh entity: a non-finite
-/// angle is discarded (0 stays), the pitch is `xRot % 360` clamped to +-90.
+/// `Entity.load`'s angles on a fresh entity: `setYRot` and `setXRot` discard a
+/// non-finite angle (0 stays) and clamp `xRot % 360` to +-90, then `setRot`
+/// takes both `% 360` again.
 pub fn loaded_rotation(tag: &Tag) -> [f32; 2] {
     let [yaw, pitch] = rotation(tag);
-    [
-        if yaw.is_finite() { yaw } else { 0.0 },
-        if pitch.is_finite() {
-            (pitch % 360.0).clamp(-90.0, 90.0)
-        } else {
-            0.0
-        },
-    ]
+    let yaw = if yaw.is_finite() { yaw } else { 0.0 };
+    let pitch = if pitch.is_finite() {
+        (pitch % 360.0).clamp(-90.0, 90.0)
+    } else {
+        0.0
+    };
+    [yaw % 360.0, pitch % 360.0]
 }
 /// `TagValueInput.getBooleanOr`: a numeric tag's byteValue is nonzero, with a false default.
 pub fn flag(tag: &Tag, key: &str) -> bool {
@@ -4486,6 +4486,21 @@ mod tests {
         assert_eq!(saved(9, Some(5)), Some(5));
     }
 
+    /// `Entity.load`: `setYRot`/`setXRot`, then `setRot`'s `% 360`.
+    #[test]
+    fn a_loaded_rotation_wraps_and_clamps_as_entity_load_does() {
+        let rot = |r: &str| {
+            let tag = horizon_world::nbt::parse_snbt(&format!("{{Rotation:{r}}}"))
+                .unwrap()
+                .0;
+            loaded_rotation(&tag)
+        };
+        assert_eq!(rot("[-170.5f,-90.0f]"), [-170.5, -90.0]);
+        assert_eq!(rot("[45.0f,135.0f]"), [45.0, 90.0]);
+        assert_eq!(rot("[400.0f,-400.0f]"), [40.0, -40.0]);
+        assert_eq!(rot("[-725.0f,370.0f]"), [-5.0, 10.0]);
+        assert_eq!(rot("[1.0f]"), [0.0, 0.0]);
+    }
     /// `LivingEntity.readAdditionalSaveData` reads `HurtTime` and `DeathTime`
     /// with `getShortOr`: an int tag is narrowed (`(short)(value & 65535)`),
     /// so 40000 is -25536 and never counts down.
