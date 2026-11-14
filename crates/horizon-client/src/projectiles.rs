@@ -952,11 +952,14 @@ impl Projectile {
         stack.count = 1;
         self.item = Some(stack);
     }
+    /// `Projectile.shoot`'s angles: `(float)(Mth.atan2(..) * 180.0F / (float)Math.PI)`,
+    /// the table `Mth.atan2` and the float pi, not the exact ones.
     fn update_rotation(&mut self) {
+        use horizon_core::geometry::trig::atan2_degrees;
         let v = self.velocity;
         let sd = (v.x * v.x + v.z * v.z).sqrt();
-        self.yaw = v.x.atan2(v.z).to_degrees() as f32;
-        self.pitch = v.y.atan2(sd).to_degrees() as f32;
+        self.yaw = atan2_degrees(v.x, v.z);
+        self.pitch = atan2_degrees(v.y, sd);
         // `Projectile.shoot` ends with `yRotO = getYRot(); xRotO = getXRot()`:
         // a freshly shot projectile interpolates from the rotation it was
         // aimed along, not from where it was created.
