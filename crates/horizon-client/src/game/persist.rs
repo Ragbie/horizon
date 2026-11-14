@@ -882,7 +882,7 @@ impl Game<'_> {
             let fuse = tnt_fuse(&tag);
             self.tnts.push(super::tnt::PrimedTnt {
                 used_portal,
-                rotation: [0.0, 0.0],
+                rotation: entity_nbt::loaded_rotation(&tag),
                 join: Default::default(),
                 no_gravity: entity_nbt::flag(&tag, "NoGravity"),
                 id,
@@ -903,7 +903,9 @@ impl Game<'_> {
                     .get("block_state")
                     .and_then(|v| entity_nbt::state_from_nbt(self.pack.assets.registry, v)),
             });
-            // `Entity.load`: the `PortalCooldown` of one that just came through.
+            // `Entity.load`: the `PortalCooldown` of one that just came through,
+            // which `handlePortal` counts down every tick.
+            self.restore_portal_cooldown(id, &tag);
             self.remember(id, uuid, tag);
             if let Some(passengers) = passengers {
                 self.load_passengers(id, passengers);

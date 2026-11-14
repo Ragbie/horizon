@@ -7922,6 +7922,38 @@ def mob_fall_clip():
                        f'/fill {x0} {y0 - 1} {z0} {x0 + 15} {y0 + 30} {z0 + 15} air',
                        f'/forceload remove {x0} {z0}')
 
+def primed_tnt_base_fields():
+    """PrimedTnt keeps Entity's own fields: Entity.load sets the saved Rotation (setXRot clamps xRot % 360 to
+    +-90), PrimedTnt.tick's handlePortal counts PortalCooldown down, and applyEffectsFromBlocks sets a fire
+    immune entity's Fire to -getFireImmuneTicks(), 0, every tick (PrimedTnt.tick never runs baseTick). Read
+    before a tick, after one, and after the chunk is unloaded and loaded again."""
+    x0, y0, z0 = 5664, 250, 5664
+    chunk = [[(x0 >> 4) + dx, (z0 >> 4) + dz] for dx in range(-2, 3) for dz in range(-2, 3)]
+    ops = [cmd(f'/forceload add {x0} {z0}', False), {'op': 'wait_chunks', 'chunks': chunk},
+           cmd(f'/fill {x0} {y0 - 1} {z0} {x0 + 15} {y0 - 1} {z0 + 15} stone', expect_result=256)]
+    cases = ['Rotation:[-170.5f,-90.0f],Fire:40s,PortalCooldown:1200',
+             'Rotation:[45.0f,135.0f],Fire:-20s,PortalCooldown:3',
+             'Rotation:[400.0f,-400.0f],HasVisualFire:1b']
+    for n, extra in enumerate(cases, 1):
+        ops.append(cmd(f'/summon tnt {x0 + 3 * n}.5 {y0} {z0 + 8}.5 {{UUID:[I;16530,0,{n},1],fuse:400,{extra}}}',
+                       expect_result=1))
+
+    def reads():
+        for n, _ in enumerate(cases, 1):
+            for key in ('Rotation', 'Fire', 'PortalCooldown'):
+                ops.append(cmd(f'/data get entity 00004092-0000-0000-0000-{n:04x}00000001 {key}'))
+
+    reads()
+    ops.append({'op': 'tick', 'n': 1})
+    reads()
+    ops.extend([cmd(f'/forceload remove {x0} {z0}', False), {'op': 'tick', 'n': 60},
+                cmd(f'/forceload add {x0} {z0}', False), {'op': 'wait_chunks', 'chunks': chunk}])
+    reads()
+    return ops + setup(f'/kill @e[type=tnt,x={x0},y={y0 - 8},z={z0},dx=16,dy=24,dz=16]',
+                       f'/fill {x0} {y0 - 1} {z0} {x0 + 15} {y0 + 4} {z0 + 15} air',
+                       f'/forceload remove {x0} {z0}')
+
+
 def orb_fall_distance():
     """#14440: an experience orb's fall (`Entity.fallDistance`). `Entity.move` casts a move of a block or
     more over fall-resetting blocks and water, then `checkFallDamage` adds the drop outside water and on
@@ -8490,6 +8522,7 @@ def groups():
         ('teleport lands', teleport_lands()),
         ('rocket data merge', rocket_data_merge()),
         ('mob fall clip', mob_fall_clip()),
+        ('primed tnt base fields', primed_tnt_base_fields()),
         ('orb fall distance', orb_fall_distance()),
         ('rocket fall distance', rocket_fall_distance()),
         ('vehicle ground and fall', vehicle_ground_and_fall()),
