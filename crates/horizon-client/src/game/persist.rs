@@ -880,9 +880,25 @@ impl Game<'_> {
             // getShortOr uses NumericTag.shortValue: floor floating values
             // to int before short narrowing; integer tags narrow directly.
             let fuse = tnt_fuse(&tag);
+            // A fresh load: Entity.load's angles. A portal arrival:
+            // teleportSetPosition's `setYRot`/`setXRot` of the turned angles,
+            // with no `% 360` on the yaw.
+            let rotation = if used_portal {
+                let [yaw, pitch] = entity_nbt::rotation(&tag);
+                [
+                    if yaw.is_finite() { yaw } else { 0.0 },
+                    if pitch.is_finite() {
+                        (pitch % 360.0).clamp(-90.0, 90.0)
+                    } else {
+                        0.0
+                    },
+                ]
+            } else {
+                entity_nbt::loaded_rotation(&tag)
+            };
             self.tnts.push(super::tnt::PrimedTnt {
                 used_portal,
-                rotation: entity_nbt::loaded_rotation(&tag),
+                rotation,
                 join: Default::default(),
                 no_gravity: entity_nbt::flag(&tag, "NoGravity"),
                 id,

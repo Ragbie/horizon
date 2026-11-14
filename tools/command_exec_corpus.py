@@ -7924,9 +7924,10 @@ def mob_fall_clip():
 
 def primed_tnt_base_fields():
     """PrimedTnt keeps Entity's own fields: Entity.load sets the saved Rotation (setXRot clamps xRot % 360 to
-    +-90), PrimedTnt.tick's handlePortal counts PortalCooldown down, and applyEffectsFromBlocks sets a fire
-    immune entity's Fire to -getFireImmuneTicks(), 0, every tick (PrimedTnt.tick never runs baseTick). Read
-    before a tick, after one, and after the chunk is unloaded and loaded again."""
+    +-90, then setRot takes both % 360), PrimedTnt.tick's handlePortal counts PortalCooldown down, and
+    applyEffectsFromBlocks sets a fire immune entity's Fire to -getFireImmuneTicks(), 0, every tick
+    (PrimedTnt.tick never runs baseTick). Read before a tick, after /data merge, after a tick, and after the
+    chunk is unloaded and loaded again."""
     x0, y0, z0 = 5664, 250, 5664
     chunk = [[(x0 >> 4) + dx, (z0 >> 4) + dz] for dx in range(-2, 3) for dz in range(-2, 3)]
     ops = [cmd(f'/forceload add {x0} {z0}', False), {'op': 'wait_chunks', 'chunks': chunk},
@@ -7943,6 +7944,11 @@ def primed_tnt_base_fields():
             for key in ('Rotation', 'Fire', 'PortalCooldown'):
                 ops.append(cmd(f'/data get entity 00004092-0000-0000-0000-{n:04x}00000001 {key}'))
 
+    reads()
+    # /data merge runs Entity.load on the live TNT: the same angles, and the merged PortalCooldown, from a portal
+    # state or none.
+    ops.append(cmd('/data merge entity 00004092-0000-0000-0000-000100000001 {PortalCooldown:0}'))
+    ops.append(cmd('/data merge entity 00004092-0000-0000-0000-000300000001 {Rotation:[400.0f,135.0f],PortalCooldown:50}'))
     reads()
     ops.append({'op': 'tick', 'n': 1})
     reads()

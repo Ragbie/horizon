@@ -70,12 +70,18 @@ pub fn rotation(tag: &Tag) -> [f32; 2] {
 /// non-finite angle (0 stays) and clamp `xRot % 360` to +-90, then `setRot`
 /// takes both `% 360` again.
 pub fn loaded_rotation(tag: &Tag) -> [f32; 2] {
+    loaded_rotation_over(tag, [0.0, 0.0])
+}
+/// [`loaded_rotation`] on an entity that already has `previous` angles
+/// (`/data merge` runs `Entity.load` on the live entity): a non-finite angle
+/// keeps the previous one.
+pub fn loaded_rotation_over(tag: &Tag, previous: [f32; 2]) -> [f32; 2] {
     let [yaw, pitch] = rotation(tag);
-    let yaw = if yaw.is_finite() { yaw } else { 0.0 };
+    let yaw = if yaw.is_finite() { yaw } else { previous[0] };
     let pitch = if pitch.is_finite() {
         (pitch % 360.0).clamp(-90.0, 90.0)
     } else {
-        0.0
+        previous[1]
     };
     [yaw % 360.0, pitch % 360.0]
 }
@@ -4500,6 +4506,22 @@ mod tests {
         assert_eq!(rot("[400.0f,-400.0f]"), [40.0, -40.0]);
         assert_eq!(rot("[-725.0f,370.0f]"), [-5.0, 10.0]);
         assert_eq!(rot("[1.0f]"), [0.0, 0.0]);
+        // On a live entity a non-finite angle (only binary NBT holds one; SNBT
+        // has no NaN, and an unreadable Rotation is Vec2.ZERO) keeps the
+        // previous one.
+        let nan = Tag::compound([(
+            "Rotation",
+            Tag::List(vec![
+                Tag::Float(f32::NAN.to_bits()),
+                Tag::Float(135.0_f32.to_bits()),
+            ]),
+        )]);
+        assert_eq!(loaded_rotation_over(&nan, [12.0, 3.0]), [12.0, 90.0]);
+        assert_eq!(rot("[\"NaNf\",135.0f]"), [0.0, 0.0]);
+        let tag = horizon_world::nbt::parse_snbt("{Rotation:[400.0f,135.0f]}")
+            .unwrap()
+            .0;
+        assert_eq!(loaded_rotation_over(&tag, [12.0, 3.0]), [40.0, 90.0]);
     }
     /// `LivingEntity.readAdditionalSaveData` reads `HurtTime` and `DeathTime`
     /// with `getShortOr`: an int tag is narrowed (`(short)(value & 65535)`),
