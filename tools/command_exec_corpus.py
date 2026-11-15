@@ -8058,6 +8058,9 @@ def primed_tnt_base_fields():
     # state or none.
     ops.append(cmd('/data merge entity 00004092-0000-0000-0000-000100000001 {PortalCooldown:0}'))
     ops.append(cmd('/data merge entity 00004092-0000-0000-0000-000300000001 {Rotation:[400.0f,135.0f],PortalCooldown:50}'))
+    # getIntOr takes any numeric tag, on a live portal state (TNT 2) or none (TNT 1).
+    ops.append(cmd('/data merge entity 00004092-0000-0000-0000-000200000001 {PortalCooldown:40s}'))
+    ops.append(cmd('/data merge entity 00004092-0000-0000-0000-000100000001 {PortalCooldown:7.9d}'))
     reads()
     ops.append({'op': 'tick', 'n': 1})
     reads()
