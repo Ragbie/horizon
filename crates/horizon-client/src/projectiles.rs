@@ -952,8 +952,9 @@ impl Projectile {
         stack.count = 1;
         self.item = Some(stack);
     }
-    /// `Projectile.shoot`'s angles: `(float)(Mth.atan2(..) * 180.0F / (float)Math.PI)`,
-    /// the table `Mth.atan2` and the float pi, not the exact ones.
+    /// The angles along the motion as `Projectile.shoot` sets them:
+    /// `(float)(Mth.atan2(..) * Mth.RAD_TO_DEG)`, the table `Mth.atan2` and the
+    /// float `180 / pi`, not the exact ones.
     fn update_rotation(&mut self) {
         use horizon_core::geometry::trig::atan2_degrees;
         let v = self.velocity;
