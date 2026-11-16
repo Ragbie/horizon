@@ -124,6 +124,20 @@ impl Source {
 /// Whether a wind push must wait for the entity's own tick: it joined before
 /// the charge (`id` below the charge's), so vanilla has ticked it already this
 /// game tick, and its kind ticks after the projectiles here.
+/// Whether an orb, primed TNT or falling block at `key` in the tick order has
+/// still to tick this tick: past the last one ticked (`done`), or held for the
+/// late pass because it joined since the spawn packets (`announced`), however
+/// far `done` went on past it (an orb that joined after it, #17269).
+fn not_ticked_yet<T: PartialOrd>(
+    ticks_after_projectiles: bool,
+    waits_for_spawn_packet: bool,
+    key: T,
+    done: Option<T>,
+    announced: T,
+) -> bool {
+    let deferred = waits_for_spawn_packet && key >= announced;
+    ticks_after_projectiles && (deferred || done.is_none_or(|d| key > d))
+}
 fn push_waits_for_tick<T: PartialOrd>(
     ticks_after_projectiles: bool,
     joined: T,
@@ -535,7 +549,7 @@ impl Game<'_> {
             spared: None,
         };
         let source = self.creatures.wind_source;
-        let done = self.ordered.done;
+        let (done, announced) = (self.ordered.done, self.ordered.announced);
         let mut late = Vec::new();
         let mut entities = self.take_entities();
         for_each_entity_mut!(entities, entity => {
@@ -564,7 +578,13 @@ impl Game<'_> {
             // Joined before the charge and not ticked yet: the push is for its next tick.
             // Where it ticks: where it joined, or where it started ticking again.
             let key = self.ordered.tick_key(entity.join_seq());
-            let waiting = entity.ticks_after_projectiles() && done.is_none_or(|d| key > d);
+            let waiting = not_ticked_yet(
+                entity.ticks_after_projectiles(),
+                entity.waits_for_spawn_packet(),
+                key,
+                done,
+                announced,
+            );
             if push_waits_for_tick(waiting, key, source) {
                 late.push((entity.id(), push));
             } else {
@@ -909,6 +929,25 @@ mod tests {
     /// ServerLevel ticks entities in join order: an orb, falling block or TNT that
     /// joined before the charge has moved by the time the charge bursts, so the
     /// push belongs to its next tick; one that joined after has not.
+    /// A TNT (join 10) summoned since the spawn packets waits for the late
+    /// pass; an orb that joined after it (11) ticked in the early pass, so
+    /// `done` is 11 when a charge (12) bursts. The TNT has not ticked: the
+    /// push waits for its tick. An orb at 10 has.
+    #[test]
+    fn a_tnt_held_for_the_late_pass_has_not_ticked_whatever_done_says() {
+        assert!(not_ticked_yet(true, true, 10, Some(11), 0));
+        assert!(push_waits_for_tick(true, 10, Some(12)));
+        assert!(
+            !not_ticked_yet(true, false, 10, Some(11), 0),
+            "an orb ticked"
+        );
+        assert!(
+            !not_ticked_yet(true, true, 10, Some(11), 20),
+            "announced: it ticked in the early pass"
+        );
+        assert!(not_ticked_yet(true, false, 12, Some(11), 0), "past done");
+        assert!(!not_ticked_yet(false, true, 12, None, 0), "ticks before");
+    }
     #[test]
     fn a_push_waits_only_for_late_ticking_kinds_that_joined_before_the_charge() {
         use crate::game::entity::Entity;
