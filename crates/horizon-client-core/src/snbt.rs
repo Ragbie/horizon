@@ -380,8 +380,8 @@ pub fn java_hash_order(
 /// one kind of contents, so their fields share one list. A compound with any
 /// other key, or with no contents key, is not one and keeps the default order.
 fn text_component_rank(
-    c: &horizon_world::nbt::Compound,
-) -> Option<impl Fn(&horizon_world::nbt::JavaString) -> usize> {
+    c: &horizon_core::nbt::Compound,
+) -> Option<impl Fn(&horizon_core::nbt::JavaString) -> usize> {
     const ORDER: &[&str] = &[
         "text",
         "translate",
@@ -424,7 +424,7 @@ fn text_component_rank(
         "selector",
         "nbt",
     ];
-    let position = |k: &horizon_world::nbt::JavaString| {
+    let position = |k: &horizon_core::nbt::JavaString| {
         let k = string_of(k);
         ORDER.iter().position(|w| *w == k)
     };
@@ -433,7 +433,7 @@ fn text_component_rank(
         .any(|(k, _)| CONTENTS.contains(&string_of(k).as_str()))
         && c.iter().all(|(k, _)| position(k).is_some());
     is_component
-        .then_some(move |k: &horizon_world::nbt::JavaString| position(k).unwrap_or(ORDER.len()))
+        .then_some(move |k: &horizon_core::nbt::JavaString| position(k).unwrap_or(ORDER.len()))
 }
 /// `NbtUtils.toPrettyComponent`: the coloured, unindented form.
 pub fn pretty(tag: &Tag) -> Text {
