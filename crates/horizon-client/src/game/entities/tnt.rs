@@ -498,10 +498,10 @@ impl Game<'_> {
         let (id, snow) = (t.id, (t.previous, t.position, t.bounds(), t.velocity));
         // Entity.applyEffectsFromBlocks: TNT is fire immune, so it is never
         // `isOnFire` and its fire ticks are set to `-getFireImmuneTicks()`, 0.
-        if let Some(horizon_world::nbt::Tag::Compound(raw)) = self.persist.raw.get_mut(&id)
+        if let Some(horizon_core::nbt::Tag::Compound(raw)) = self.persist.raw.get_mut(&id)
             && let Some(fire) = raw.get_mut(&"Fire".into())
         {
-            *fire = horizon_world::nbt::Tag::Short(0);
+            *fire = horizon_core::nbt::Tag::Short(0);
         }
         // Entity.checkFallDamage: fallOn and HIT_GROUND after a fall, during the move.
         if let Some(fall) = landed {
