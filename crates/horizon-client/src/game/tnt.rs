@@ -2243,12 +2243,9 @@ mod entity_collision_tests {
     use horizon_core::position::ChunkPos;
     use std::sync::Arc;
 
-    /// `Entity.collide` for primed TNT, a falling block and an experience orb:
-    /// a boat holds the TNT and the orb up, a shulker the sand, as they hold
-    /// up a dropped item (`canBeCollidedWith`).
-    #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn tnt_sand_and_orbs_land_on_boats_and_shulkers() {
+    /// A server game over a stone floor at y 199 in chunk (0, 0), its
+    /// neighbourhood loaded and forced so entities tick.
+    fn ticking_game(name: &str) -> Game<'static> {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
@@ -2266,11 +2263,11 @@ mod entity_collision_tests {
         let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
         options.resources = root.clone();
         options.game_dir = Some(
-            std::env::temp_dir().join(format!("horizon-tnt-boat-unit-{}", std::process::id())),
+            std::env::temp_dir().join(format!("horizon-tnt-{name}-unit-{}", std::process::id())),
         );
         options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
         let mut game = Game::new(
-            &loaded.resources,
+            Box::leak(Box::new(loaded.resources)),
             loaded.pack,
             loaded.gui.unwrap(),
             options,
@@ -2284,7 +2281,6 @@ mod entity_collision_tests {
         game.ui.difficulty = 2;
         let registry = &game.pack.assets.registry;
         let stone = registry.default_state("minecraft:stone").unwrap();
-        let sand = registry.default_state("minecraft:sand").unwrap();
         let mut chunk = Chunk::empty(0, 0);
         for x in 0..16 {
             for z in 0..16 {
@@ -2297,6 +2293,22 @@ mod entity_collision_tests {
             .unwrap();
         game.load_ticking_neighbourhood(0, 0);
         assert!(game.run_command("forceload add 0 0"));
+        game
+    }
+
+    /// `Entity.collide` for primed TNT, a falling block and an experience orb:
+    /// a boat holds the TNT and the orb up, a shulker the sand, as they hold
+    /// up a dropped item (`canBeCollidedWith`).
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn tnt_sand_and_orbs_land_on_boats_and_shulkers() {
+        let mut game = ticking_game("boat");
+        let sand = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:sand")
+            .unwrap();
         assert!(game.run_command("summon oak_boat 4.5 200 4.5"));
         assert!(game.run_command("summon oak_boat 12.5 200 12.5"));
         assert!(game.run_command("summon shulker 8.5 200 8.5 {NoAI:1b}"));
@@ -2342,5 +2354,21 @@ mod entity_collision_tests {
                 .any(|i| &*i.stack.item == "minecraft:sand"),
             "the sand breaks into an item"
         );
+    }
+
+    /// `ServerLevel.tick` ticks every entity in the level's tick list, in the
+    /// order they joined: an experience orb that joined after three primed
+    /// TNT leaves them their tick (#17269). Each TNT's fuse counts down once.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn primed_tnt_ticks_when_an_orb_joined_after_it() {
+        let mut game = ticking_game("orb-order");
+        for x in [3, 6, 9] {
+            assert!(game.run_command(&format!("summon tnt {x}.5 200 8.5 {{fuse:400}}")));
+        }
+        assert!(game.run_command("summon experience_orb 12.5 200 2.5 {Value:3}"));
+        game.tick_world(true).unwrap();
+        let fuses: Vec<i32> = game.tnts.iter().map(|t| t.fuse).collect();
+        assert_eq!(fuses, [399, 399, 399]);
     }
 }
