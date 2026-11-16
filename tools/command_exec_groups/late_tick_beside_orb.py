@@ -15,10 +15,10 @@ def cases(cmd, setup):
     uuids = []
     for area, orb in ((0, True), (8, False)):
         for n in range(1, 4):
-            uuids.append((f'000043c5-0000-0000-{area:04x}-{n:04x}00000001', 'fuse'))
+            uuids.append((f'{17269:08x}-0000-{area:04x}-0000-{n:04x}00000001', 'fuse'))
             ops.append(cmd(f'/summon tnt {x0 + 3 * n}.5 {y0} {z0 + area + 2}.5 '
                            f'{{UUID:[I;17269,{area},{n},1],fuse:400}}', expect_result=1))
-        uuids.append((f'000043c5-0000-0000-{area:04x}-000400000001', 'Time'))
+        uuids.append((f'{17269:08x}-0000-{area:04x}-0000-000400000001', 'Time'))
         ops.append(cmd(f'/summon falling_block {x0 + 12}.5 {y0} {z0 + area + 2}.5 '
                        f'{{UUID:[I;17269,{area},4,1],BlockState:{{Name:"minecraft:sand"}},Time:1,NoGravity:1b}}',
                        expect_result=1))
