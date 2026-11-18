@@ -855,8 +855,7 @@ runtime or new dependency. Server-sent events can replace the polling later if a
     seconds and lost otherwise, as the monitor clears its flag whatever it did; and `server/status`, the
     heartbeat: every `status-heartbeat-interval` seconds (none at 0, the first after as many) the status
     `server/status` answers, up or not, to whoever is connected;
-  - planned: the rest of `serversettings/*` and the world-upgrade notifications (after `WorldUpgrader`'s server
-    side).
+  - planned: world-upgrade notifications, after the server-side `WorldUpgrader` exists.
 
 ## 9. Benchmark plan (bots against vanilla and Paper)
 
@@ -913,6 +912,9 @@ reproducible by anyone, and show the same gameplay on both sides.
   machine, commit, Java version, settings and every run) and prints a comparison table. Results are
   published like the client benchmark, with the machine, the versions and the exact commands. TPS is derived
   from `/tick query`'s average (20 while it fits in 50 ms), since the command reports times, not the rate.
+- **Published four-way results.** The comparison against vanilla, Paper and Fabric + Lithium is
+  [performance/server-vs-vanilla.md](performance/server-vs-vanilla.md); the newer Horizon-versus-Pumpkin run is in
+  [performance/server-vs-pumpkin.md](performance/server-vs-pumpkin.md). `tools/server_bench.py` reruns both.
 - **First run (PR 5,** on a busy shared Mac mini, so the numbers are noisy). With 1 bot Horizon ticks in
   3.5 ms against vanilla's 11.2 ms and uses 1.6 GB against 3.6 GB. At 10 and 25 `mixed` bots Horizon falls
   to about 10 TPS where vanilla keeps 20, and at 50 both land at about 15 TPS. The work isn't equal yet:
