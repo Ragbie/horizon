@@ -8351,6 +8351,7 @@ def primed_tnt_base_fields():
     ops.append({'op': 'tick', 'n': 1})
     reads()
     ops.extend([cmd(f'/forceload remove {x0} {z0}', False), {'op': 'tick', 'n': 60},
+                cmd(f'/execute unless loaded {x0} {y0} {z0}', expect_result=1),
                 cmd(f'/forceload add {x0} {z0}', False), {'op': 'wait_chunks', 'chunks': chunk}])
     reads()
     return ops + setup(f'/kill @e[type=tnt,x={x0},y={y0 - 8},z={z0},dx=16,dy=24,dz=16]',
