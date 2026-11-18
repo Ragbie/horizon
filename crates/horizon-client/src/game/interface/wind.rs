@@ -27,6 +27,19 @@ const PLAYER_KNOCKBACK: f32 = 1.22;
 /// `BreezeWindCharge.RADIUS`.
 const BREEZE_RADIUS: f32 = 3.0;
 
+/// A burst that reaches some entities only after their own tick: vanilla has
+/// ticked them by the time the charge bursts, and here they tick after the
+/// projectiles (`Game::apply_late_wind_pushes`).
+pub(super) struct LateWindBurst {
+    center: [f64; 3],
+    radius: f32,
+    multiplier: f64,
+    blast: Blast,
+    blocks: Vec<[i32; 3]>,
+    /// The entities still to tick when it went off, by id.
+    waiting: BTreeSet<u32>,
+}
+
 /// The wind charges that met a boat or a minecart in a tick's projectile pass,
 /// as they were before it: one whose vehicle an earlier charge of the tick
 /// breaks ticks again without it (`Game::broken_vehicle_retick`).
@@ -521,24 +534,6 @@ impl Game<'_> {
                 .ui
                 .rules
                 .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING);
-        let diameter = f64::from(radius * 2.0);
-        let distance = |p: [f64; 3]| {
-            ((p[0] - center[0]).powi(2) + (p[1] - center[1]).powi(2) + (p[2] - center[2]).powi(2))
-                .sqrt()
-        };
-        let direction = |origin: [f64; 3]| {
-            let d = [
-                origin[0] - center[0],
-                origin[1] - center[1],
-                origin[2] - center[2],
-            ];
-            let l = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-            if l < 1.0e-5 {
-                [0.0; 3]
-            } else {
-                [d[0] / l, d[1] / l, d[2] / l]
-            }
-        };
         // The player, then every other player in the level (LAN guests),
         // each swapped in as the player. In a guest's turn (a mace's wind
         // burst) the player is that guest.
@@ -577,32 +572,13 @@ impl Game<'_> {
         };
         let source = self.creatures.wind_source;
         let (done, announced) = (self.ordered.done, self.ordered.announced);
-        let mut late = Vec::new();
+        let mut waiting_ids = BTreeSet::new();
         let mut entities = self.take_entities();
         for_each_entity_mut!(entities, entity => {
-            if entity.ignores_explosion(&burst) || !entity.pushed_by_wind() {
-                return;
-            }
-            let feet = entity.position();
-            let feet = [feet.x, feet.y, feet.z];
-            let dist = distance(feet) / diameter;
-            if dist > 1.0 {
-                return;
-            }
-            let b = entity.explosion_box();
-            let (lo, hi) = (b.min_position(), b.max_position());
-            let exposure = self.seen_percent(center, [lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z]);
-            let power = (1.0 - dist) * f64::from(exposure) * multiplier;
-            let dir = direction([feet[0], feet[1] + entity.explosion_eye_height(), feet[2]]);
-            let mut push = [dir[0] * power, dir[1] * power, dir[2] * power];
-            let id = Some(entity.id());
-            self.native_explosion_knockback(self.dim.id(), center, blocks, id, &mut push);
-            let push = Vec3::new(push[0], push[1], push[2]);
             // ServerLevel ticks entities in the order they joined. One that
             // joined before the charge has ticked by now in vanilla, so the
-            // push is for its next tick; here its kind ticks after the
-            // projectiles, so the push waits for that tick to run.
-            // Joined before the charge and not ticked yet: the push is for its next tick.
+            // burst finds it where that tick left it; here its kind ticks
+            // after the projectiles, so the burst reaches it after that tick.
             // Where it ticks: where it joined, or where it started ticking again.
             let key = self.ordered.tick_key(entity.join_seq());
             let waiting = not_ticked_yet(
@@ -613,30 +589,95 @@ impl Game<'_> {
                 announced,
             );
             if push_waits_for_tick(waiting, key, source) {
-                late.push((entity.id(), push));
-            } else {
+                waiting_ids.insert(entity.id());
+            } else if let Some(push) =
+                self.wind_push_on(&*entity, center, radius, multiplier, &burst, blocks)
+            {
                 entity.push_from_explosion(push);
             }
         });
         self.restore_entities(entities);
-        self.creatures.late_wind_pushes.extend(late);
+        if !waiting_ids.is_empty() {
+            self.creatures.late_wind_pushes.push(LateWindBurst {
+                center,
+                radius,
+                multiplier,
+                blast: burst,
+                blocks: blocks.to_vec(),
+                waiting: waiting_ids,
+            });
+        }
         pushed
     }
-    /// The pushes `wind_knockback` held for entities that tick after the
-    /// projectiles, applied once those entities have ticked.
+    /// `ServerExplosion.hurtEntities` for one entity where it stands now:
+    /// its distance is from its feet, its direction from its eyes. `None`
+    /// when the burst leaves it alone.
+    fn wind_push_on(
+        &mut self,
+        entity: &impl super::entity::Entity,
+        center: [f64; 3],
+        radius: f32,
+        multiplier: f64,
+        blast: &Blast,
+        blocks: &[[i32; 3]],
+    ) -> Option<Vec3> {
+        if entity.ignores_explosion(blast) || !entity.pushed_by_wind() {
+            return None;
+        }
+        let feet = entity.position();
+        let to_feet = [feet.x - center[0], feet.y - center[1], feet.z - center[2]];
+        let dist = (to_feet[0].powi(2) + to_feet[1].powi(2) + to_feet[2].powi(2)).sqrt()
+            / f64::from(radius * 2.0);
+        if dist > 1.0 {
+            return None;
+        }
+        let b = entity.explosion_box();
+        let (lo, hi) = (b.min_position(), b.max_position());
+        let exposure = self.seen_percent(center, [lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z]);
+        let power = (1.0 - dist) * f64::from(exposure) * multiplier;
+        let d = [
+            to_feet[0],
+            to_feet[1] + entity.explosion_eye_height(),
+            to_feet[2],
+        ];
+        let l = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        let dir = if l < 1.0e-5 {
+            [0.0; 3]
+        } else {
+            [d[0] / l, d[1] / l, d[2] / l]
+        };
+        let mut push = [dir[0] * power, dir[1] * power, dir[2] * power];
+        let id = Some(entity.id());
+        self.native_explosion_knockback(self.dim.id(), center, blocks, id, &mut push);
+        Some(Vec3::new(push[0], push[1], push[2]))
+    }
+    /// The bursts `wind_knockback` held for entities that tick after the
+    /// projectiles, measured now that those entities have ticked: one that
+    /// moved out of reach is not pushed, one that moved into it is, and one
+    /// its own tick removed is gone.
     pub(super) fn apply_late_wind_pushes(&mut self) {
         let late = std::mem::take(&mut self.creatures.late_wind_pushes);
         if late.is_empty() {
             return;
         }
         let mut entities = self.take_entities();
-        for_each_entity_mut!(entities, entity => {
-            // Every burst of the tick pushed it, one after the other.
-            let id = entity.id();
-            for (_, push) in late.iter().filter(|(pushed, _)| *pushed == id) {
-                entity.push_from_explosion(*push);
-            }
-        });
+        // Every burst of the tick, one after the other.
+        for b in &late {
+            for_each_entity_mut!(entities, entity => {
+                if b.waiting.contains(&entity.id())
+                    && let Some(push) = self.wind_push_on(
+                        &*entity,
+                        b.center,
+                        b.radius,
+                        b.multiplier,
+                        &b.blast,
+                        &b.blocks,
+                    )
+                {
+                    entity.push_from_explosion(push);
+                }
+            });
+        }
         self.restore_entities(entities);
     }
     /// `ServerExplosion.hurtEntities` for the player: the push, less
