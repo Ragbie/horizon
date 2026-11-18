@@ -4768,7 +4768,7 @@ mod tests {
     #[test]
     fn a_loaded_rotation_wraps_and_clamps_as_entity_load_does() {
         let rot = |r: &str| {
-            let tag = horizon_world::nbt::parse_snbt(&format!("{{Rotation:{r}}}"))
+            let tag = horizon_core::nbt::parse_snbt(&format!("{{Rotation:{r}}}"))
                 .unwrap()
                 .0;
             loaded_rotation(&tag)
@@ -4790,7 +4790,7 @@ mod tests {
         )]);
         assert_eq!(loaded_rotation_over(&nan, [12.0, 3.0]), [12.0, 90.0]);
         assert_eq!(rot("[\"NaNf\",135.0f]"), [0.0, 0.0]);
-        let tag = horizon_world::nbt::parse_snbt("{Rotation:[400.0f,135.0f]}")
+        let tag = horizon_core::nbt::parse_snbt("{Rotation:[400.0f,135.0f]}")
             .unwrap()
             .0;
         assert_eq!(loaded_rotation_over(&tag, [12.0, 3.0]), [40.0, 90.0]);
