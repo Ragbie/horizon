@@ -1269,9 +1269,17 @@ def projectile_honey_slide():
         east = {'arrow': 3.22, 'trident': 3.22, 'dragon_fireball': 3.46}.get(entity, 3.1)
         ops.append(cmd(f'/summon {entity} {x0 + east} {y0 + 9} {z}.5 {{UUID:[I;21000,0,{n},1],{nbt}}}',
                        expect_result=1))
+    # A trident that slides and hits a chicken in the same move: `stepMoveAndHit` stops it where the
+    # move met the chicken's top (halfway, y0 + 8.7), though honey slows the motion before `onHit`.
+    impale = len(cases) + 1
+    ops += [cmd(f'/fill {x0 + 8} {y0} {z0 + 1} {x0 + 8} {y0 + 9} {z0 + 1} honey_block', expect_result=10),
+            cmd(f'/summon chicken {x0 + 9.22} {y0 + 8} {z0 + 1}.5 '
+                '{NoAI:1b,NoGravity:1b,Invulnerable:1b,UUID:[I;21000,0,99,1]}', expect_result=1),
+            cmd(f'/summon trident {x0 + 9.22} {y0 + 9} {z0 + 1}.5 {{UUID:[I;21000,0,{impale},1],'
+                'Motion:[0.05d,-0.6d,0d],pickup:0b}', expect_result=1)]
 
     def reads():
-        for n, _ in enumerate(cases, 1):
+        for n in range(1, impale + 1):
             for key in ('Motion', 'Pos', 'fall_distance'):
                 ops.append(cmd(f'/data get entity 00005208-0000-0000-0000-{n:04x}00000001 {key}'))
 

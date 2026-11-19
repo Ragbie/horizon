@@ -361,6 +361,7 @@ impl ThrownTrident {
         self.position = to;
         // applyEffectsFromBlocks' honey (HoneyBlock.entityInside) along the
         // move: the cells the final box (deflated by 1e-5F) swept through.
+        // `isAffectedByBlocks` is false without physics (a Loyalty return).
         let eps = f64::from(1.0e-5_f32);
         let bounds = Aabb::new(
             Vec3::new(to.x - HALF, to.y, to.z - HALF),
@@ -369,7 +370,8 @@ impl ThrownTrident {
         .deflate(Vec3::new(eps, eps, eps));
         for p in horizon_client::projectiles::swept_cells(from, to, bounds) {
             let cell = [p.x, p.y, p.z];
-            if w.honey(cell)
+            if !self.no_physics
+                && w.honey(cell)
                 && let Some(v) = horizon_client::projectiles::honey_slide(
                     self.velocity,
                     to,
@@ -735,6 +737,18 @@ mod tests {
             Vec3::new(0.0, -0.6 * f64::from(0.99f32) - 0.05, 0.0)
         );
         assert_eq!(far.fall_distance, 6.0);
+        // A returning trident has no physics: `isAffectedByBlocks` skips the
+        // honey (review on #14674).
+        let mut ghost = ThrownTrident::remote(1, Vec3::new(6.22, 209.0, 10.5), 0.0, 0.0);
+        ghost.no_physics = true;
+        ghost.velocity = Vec3::new(0.05, -0.6, 0.0);
+        ghost.fall_distance = 6.0;
+        ghost.remote_tick(&Honey, None);
+        assert_eq!(
+            ghost.velocity,
+            Vec3::new(0.05 * f64::from(0.99f32), -0.6 * f64::from(0.99f32), 0.0)
+        );
+        assert_eq!(ghost.fall_distance, 6.0);
         // A diagonal move whose enclosing box holds the honey column but whose
         // swept box never touches it (review on #14674): no slide.
         let mut diagonal = ThrownTrident::remote(1, Vec3::new(5.5, 209.5, 6.5), 0.0, 0.0);
