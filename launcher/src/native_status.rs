@@ -178,7 +178,8 @@ pub fn wasm_points(home: &Path) -> Vec<horizon_platform::mod_package::index::nat
 
 /// The native mods turned on in game folder `home`, read from their `.hmod`s. One that can't be
 /// read always counts, with its file name and no version, so it needs a build (which says why):
-/// the on/off list is keyed by the manifest id, which an unreadable file can't give.
+/// the on/off list is keyed by the manifest id, which an unreadable file can't give. One in the
+/// format from before the SDK never counts: no build can take it (`native_mods::stage_installed`).
 pub fn enabled(home: &Path) -> Vec<Mod> {
     let mut out = Vec::new();
     for path in hmods(home) {
@@ -190,6 +191,7 @@ pub fn enabled(home: &Path) -> Vec<Mod> {
                     out.push((b.manifest.id, b.manifest.version, Some(digest)));
                 }
             }
+            Err(_) if legacy_format(&path) => {}
             Err(_) => out.push((stem(&path), String::new(), None)),
         }
     }
@@ -241,6 +243,9 @@ pub struct Installed {
     /// only the file name), nor for a `horizon-mods/` copy whose id another mod has: either
     /// would switch that other mod. The file stays removable.
     pub switch: bool,
+    /// Whether it is a native mod in the format from before the `.hmod` SDK
+    /// ([`legacy_format`]): it stays installed but no build takes it.
+    pub legacy: bool,
 }
 
 impl Installed {
@@ -252,9 +257,12 @@ impl Installed {
 
     /// Why the file can't load, shown instead of where it came from.
     pub fn note(&self) -> Option<&'static str> {
-        self.retired().then(|| {
-            crate::i18n::tr("Old format (.hnmod): ask its author to republish it as .hmod")
-        })
+        if self.retired() {
+            return Some(crate::i18n::tr(
+                "Old format (.hnmod): ask its author to republish it as .hmod",
+            ));
+        }
+        self.legacy.then(legacy_note)
     }
 
     /// Whether the file is in `horizon-native-mods/`; one in `horizon-mods/` is a wasm or
@@ -270,7 +278,25 @@ impl Installed {
 pub fn asks_for_build<'a>(files: impl IntoIterator<Item = &'a Installed>) -> bool {
     files
         .into_iter()
-        .any(|file| file.native() && !file.retired())
+        .any(|file| file.native() && !file.retired() && !file.legacy)
+}
+
+/// Whether the native `.hmod` at `path` is in the format from before the `.hmod` SDK.
+pub fn legacy_format(path: &Path) -> bool {
+    horizon_platform::mod_package::index::native::legacy_format(path)
+}
+
+/// Whether the browser-tracked `file` (relative to the game folder `home`) is a native mod that
+/// asks for a build: a native `.hmod` not in the format from before the SDK. Reads the archive.
+pub fn tracked_asks_for_build(home: &Path, file: &str) -> bool {
+    is_native_file(file) && !legacy_format(&home.join(file))
+}
+
+/// What the Mods page says of a native mod in the format from before the `.hmod` SDK.
+pub fn legacy_note() -> &'static str {
+    crate::i18n::tr(
+        "Made for the old native mod format: Play leaves it out. It needs a version made for the new SDK.",
+    )
 }
 
 /// Discover the actual files, not just GitHub sidecars. Registry files already have a row.
@@ -283,11 +309,22 @@ pub fn untracked(home: &Path) -> Vec<Installed> {
     let wasm = wasm_hmods(home)
         .into_iter()
         .map(|path| (horizon_platform::mod_package::mod_list::DIR, path));
+    // A tracked `ruby.hmod` renamed `Ruby.hmod` on a folder that ignores case is still that file:
+    // both names resolve to the same entry. On a case-sensitive one they stay two files.
+    let tracked_paths: Vec<_> = tracked
+        .entries
+        .iter()
+        .map(|e| (e.file.as_str(), fs::canonicalize(home.join(&e.file)).ok()))
+        .collect();
     let mut rows: Vec<Installed> = native
         .chain(wasm)
         .filter_map(|(folder, path)| {
             let file = format!("{folder}/{}", path.file_name()?.to_str()?);
-            if !path.is_file() || tracked.entries.iter().any(|e| same_file(&e.file, &file)) {
+            let canonical = fs::canonicalize(&path).ok();
+            let is_tracked = tracked_paths
+                .iter()
+                .any(|(f, c)| *f == file || (c.is_some() && *c == canonical));
+            if !path.is_file() || is_tracked {
                 return None;
             }
             let package = horizon_platform::mod_package::manifest::Package::read(&path);
@@ -312,7 +349,9 @@ pub fn untracked(home: &Path) -> Vec<Installed> {
                 version,
                 internals,
                 origin,
-                switch: package.is_ok(),
+                // A retired `.hnmod` never switches the live mod, even when the archive reads.
+                switch: hmod && package.is_ok(),
+                legacy: github && package.is_err() && legacy_format(&path),
                 icon: package.map(|p| p.icon.map(Arc::new)),
             })
         })
@@ -322,28 +361,22 @@ pub fn untracked(home: &Path) -> Vec<Installed> {
         .iter()
         .filter_map(crate::browser::horizon::mod_id)
         .collect();
-    let ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
+    // Only ids read from a manifest: an unreadable file's name says nothing about its id.
+    let ids: Vec<Option<String>> = rows
+        .iter()
+        .map(|r| r.switch.then(|| r.id.clone()))
+        .collect();
     for (i, row) in rows.iter_mut().enumerate() {
         let shared = tracked_ids.contains(&row.id.as_str())
             || ids
                 .iter()
                 .enumerate()
-                .any(|(j, id)| j != i && *id == row.id);
+                .any(|(j, id)| j != i && id.as_ref() == Some(&row.id));
         if !row.native() && shared {
             row.switch = false;
         }
     }
     rows
-}
-
-/// Whether installed.json's `tracked` names `file`: Windows and macOS folders ignore case, so
-/// a tracked `ruby.hmod` renamed `Ruby.hmod` is still that file, not a hand-copied one.
-fn same_file(tracked: &str, file: &str) -> bool {
-    if cfg!(any(windows, target_os = "macos")) {
-        tracked.eq_ignore_ascii_case(file)
-    } else {
-        tracked == file
-    }
 }
 
 /// The mods installed version `version` was built with, or None when it isn't a native build
@@ -732,6 +765,7 @@ mod tests {
     #[test]
     fn an_unreadable_copy_has_no_switch_and_a_renamed_tracked_file_no_second_row() {
         use crate::browser::installed;
+        use std::io::Write;
         let home = tempfile::tempdir().unwrap();
         let folder = home
             .path()
@@ -740,6 +774,20 @@ mod tests {
         // Its id would be only its file name, which could be another mod's.
         fs::write(folder.join("ruby.hmod"), b"corrupt").unwrap();
         fs::write(folder.join("Gem.hmod"), b"corrupt").unwrap();
+        // A valid copy whose id is the corrupt file's name keeps its switch.
+        let mut zip = zip::ZipWriter::new(fs::File::create(folder.join("my-build.hmod")).unwrap());
+        zip.start_file("horizon-mod.toml", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(
+            b"id = 'ruby'
+name = 'Ruby'
+version = '1'
+api = '0.2'
+capabilities = ['registries']
+",
+        )
+        .unwrap();
+        zip.finish().unwrap();
         let entry: installed::Entry = serde_json::from_value(serde_json::json!({"source":"horizon","project":"gem","slug":"gem","title":"Gem","kind":"mod","version":"1","number":"1","file":"horizon-mods/gem.hmod","checksum":"","page":""})).unwrap();
         installed::Installed {
             entries: vec![entry],
@@ -748,15 +796,16 @@ mod tests {
         .unwrap();
         let files = untracked(home.path());
         let seen: Vec<_> = files.iter().map(|f| (f.file.as_str(), f.switch)).collect();
-        // Windows and macOS: `Gem.hmod` is the tracked `gem.hmod` renamed, not a second mod.
-        let expected: &[(&str, bool)] = if cfg!(any(windows, target_os = "macos")) {
-            &[("horizon-mods/ruby.hmod", false)]
-        } else {
-            &[
-                ("horizon-mods/Gem.hmod", false),
-                ("horizon-mods/ruby.hmod", false),
-            ]
-        };
+        // A folder that ignores case: `Gem.hmod` is the tracked `gem.hmod` renamed, not a second
+        // mod. A case-sensitive one holds two files.
+        let renamed = folder.join("gem.hmod").exists();
+        let mut expected = vec![
+            ("horizon-mods/my-build.hmod", true),
+            ("horizon-mods/ruby.hmod", false),
+        ];
+        if !renamed {
+            expected.insert(0, ("horizon-mods/Gem.hmod", false));
+        }
         assert_eq!(seen, expected);
     }
 
@@ -824,6 +873,27 @@ mod tests {
     }
 
     #[test]
+    fn an_old_format_hmod_says_it_needs_a_new_sdk_version_and_asks_for_no_build() {
+        let home = tempfile::tempdir().unwrap();
+        let folder = home.path().join(native_mods::INSTALLED);
+        fs::create_dir_all(&folder).unwrap();
+        let mut zip =
+            zip::ZipWriter::new(fs::File::create(folder.join("fullbright.hmod")).unwrap());
+        zip.start_file(
+            "horizon-native.json",
+            zip::write::SimpleFileOptions::default(),
+        )
+        .unwrap();
+        std::io::Write::write_all(&mut zip, b"{\"schema\": 1}").unwrap();
+        zip.finish().unwrap();
+        let files = untracked(home.path());
+        assert!(files[0].legacy && !files[0].retired());
+        assert_eq!(files[0].note(), Some(legacy_note()));
+        assert!(!asks_for_build(&files));
+        assert!(enabled(home.path()).is_empty());
+    }
+
+    #[test]
     fn a_retired_hnmod_offers_only_remove_and_asks_for_no_build() {
         use std::io::Write;
         let home = tempfile::tempdir().unwrap();
@@ -886,6 +956,20 @@ mod tests {
             ]
         );
         assert!(asks_for_build(&files));
+
+        // A readable backup of the live mod saved as `.hnmod` still never switches `zoom`.
+        fs::copy(folder.join("zoom.hmod"), folder.join("zoom.hnmod")).unwrap();
+        let switches: Vec<_> = untracked(home.path())
+            .iter()
+            .map(|f| (f.file.clone(), f.switch))
+            .collect();
+        assert_eq!(
+            switches,
+            [
+                ("horizon-native-mods/zoom.hmod".to_owned(), true),
+                ("horizon-native-mods/zoom.hnmod".to_owned(), false)
+            ]
+        );
     }
 
     #[test]

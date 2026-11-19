@@ -483,8 +483,7 @@ pub trait PlayersBackend {
     /// Side: server.
     /// The permission level `player_hide` hides the player from (players below it don't see
     /// them), None when they are not hidden. Kept by UUID, so it reads the same for a player
-    /// who rejoined hidden. The outer None is a stale world epoch, a client, or a world
-    /// nobody else can join.
+    /// who rejoined hidden. The outer None is a stale world epoch or a client.
     #[access(WorldOnly)]
     fn player_hidden(&self, player: PlayerRef) -> Option<Option<u8>>;
     /// Side: server.
@@ -631,6 +630,33 @@ pub trait PlayersBackendMut {
     #[access(WorldOnly)]
     fn player_set_nickname(&mut self, player: PlayerRef, nickname: Option<&str>) -> bool;
     /// Side: server.
+    /// Shows `sidebar` on that player's screen in place of the one shown before, or takes it
+    /// away (None): an objective only their client holds, displayed in the sidebar slot, its
+    /// lines as scores with fixed or blank number formats (`ClientboundSetObjectivePacket`,
+    /// `SetDisplayObjective`, `SetScore`). The server's scoreboard, `/scoreboard` and the other
+    /// players don't see it; it covers a sidebar objective the world shows, for this player,
+    /// and is gone when they leave. False when they aren't on.
+    #[access(WorldOnly)]
+    fn player_set_sidebar(
+        &mut self,
+        player: PlayerRef,
+        sidebar: Option<Sidebar>,
+    ) -> Result<bool, TextFormError>;
+    /// Side: server.
+    /// Shows `name` for that player in everyone's Tab list (Paper's `Player.playerListName`,
+    /// NeoForge's `ServerPlayer.refreshTabListName`), colours and all; None shows the name the
+    /// game would (their nickname or real name). The `player_tab_list_name_format` hook still
+    /// has the last word. Only the Tab list: chat, name tags and commands keep the real name.
+    /// Kept by UUID until a mod sets it again or the server stops (also if they leave and come
+    /// back). False when the server list is unavailable, the handle is stale or the player
+    /// isn't online.
+    #[access(WorldOnly)]
+    fn player_set_list_name(
+        &mut self,
+        player: PlayerRef,
+        name: Option<Text>,
+    ) -> Result<bool, TextFormError>;
+    /// Side: server.
     /// Hides that player (a vanish) from the players below permission
     /// `level`, or shows them again (None): from the next tick those players
     /// lose them from the Tab list and the world (their client stops
@@ -639,7 +665,7 @@ pub trait PlayersBackendMut {
     /// a player made an operator meanwhile sees them again. Kept by UUID, even
     /// after this handle disconnects (the player rejoins hidden), until a mod sets it again
     /// or the server stops. Works inside a player's hook too; false for a stale
-    /// world epoch, on a client and in a world nobody else can join.
+    /// world epoch and on a client.
     #[access(WorldOnly)]
     fn player_hide(&mut self, player: PlayerRef, level: Option<u8>) -> bool;
     /// Side: server.
