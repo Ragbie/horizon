@@ -1144,6 +1144,7 @@ impl Game<'_> {
                     true,
                 );
             }
+            self.armor_stand_freeze_tick(i);
             // LivingEntity.aiStep calls pushEntities after travel. The stand's
             // own doPush is empty; only this shove runs.
             self.push_rideable_minecarts(i);
@@ -1258,6 +1259,69 @@ impl Game<'_> {
                 .velocity
                 .add_vector(Vec3::new(xd / dd * 4.0, 0.2, zd / dd * 4.0));
         }
+    }
+    /// `LivingEntity.aiStep`'s freezing step, after `applyEffectsFromBlocks`:
+    /// powder snow's `InsideBlockEffectType.FREEZE` adds a tick (up to
+    /// `getTicksRequiredToFreeze`) while the stand can freeze, and otherwise
+    /// it thaws by two. A marker or `NoGravity` stand has `noPhysics`, so no
+    /// block reaches it (`Entity.isAffectedByBlocks`), but it still thaws. A
+    /// stand's `TicksFrozen` is its loaded tag's, as its `Air` is. Freeze
+    /// damage needs nothing here: `ArmorStand.hurtServer` ignores it.
+    fn armor_stand_freeze_tick(&mut self, i: usize) {
+        let a = &self.armor_stands[i];
+        let id = a.id;
+        let frozen = self
+            .persist
+            .raw
+            .get(&id)
+            .map_or(0, crate::game::boats::saved_ticks_frozen);
+        let in_snow = !Entity::no_physics(a, a.no_physics) && {
+            let b = a.bounds().deflate(Vec3::new(1e-5, 1e-5, 1e-5));
+            let (lo, hi) = (b.min_position(), b.max_position());
+            let facts = self.res.facts();
+            (lo.x.floor() as i32..=hi.x.floor() as i32).any(|x| {
+                (lo.y.floor() as i32..=hi.y.floor() as i32).any(|y| {
+                    (lo.z.floor() as i32..=hi.z.floor() as i32).any(|z| {
+                        &*facts.get(self.world.block(x, y, z)).name == "minecraft:powder_snow"
+                    })
+                })
+            })
+        };
+        if !in_snow && frozen == 0 {
+            return;
+        }
+        // ArmorStand inherits LivingEntity.canFreeze: not a spectator, not a
+        // `#freeze_immune_entity_types` type (armor_stand is not), and no
+        // `#freeze_immune_wearables` piece in an armor slot (the body's too).
+        let immune = self
+            .res
+            .items()
+            .item_tags
+            .get("minecraft:freeze_immune_wearables");
+        let can_freeze = ![
+            horizon_items::equipment::HEAD,
+            horizon_items::equipment::CHEST,
+            horizon_items::equipment::LEGS,
+            horizon_items::equipment::FEET,
+            horizon_items::equipment::BODY,
+        ]
+        .into_iter()
+        .filter_map(|slot| a.equipment.get(slot))
+        .any(|stack| immune.is_some_and(|tag| tag.contains(&*stack.item)));
+        let next = if in_snow && can_freeze {
+            (frozen + 1).min(horizon_client::motion::PlayerMotion::TICKS_REQUIRED_TO_FREEZE)
+        } else {
+            (frozen - 2).max(0)
+        };
+        let horizon_core::nbt::Tag::Compound(map) = self
+            .persist
+            .raw
+            .entry(id)
+            .or_insert_with(|| horizon_core::nbt::Tag::Compound(Default::default()))
+        else {
+            return;
+        };
+        crate::game::boats::put_ticks_frozen(map, next);
     }
     /// `ArmorStand.pushEntities`: a plain minecart (`RIDABLE_MINECARTS`,
     /// `AbstractMinecart.isRideable`) whose box meets the stand's is shoved
