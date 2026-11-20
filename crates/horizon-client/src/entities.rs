@@ -2167,15 +2167,28 @@ impl ArmorStand {
         }
         let fire = crate::motion::environment::fire_contact(world, registry, self.bounds()) > 0.0;
         // The fire block reaches a stand through `applyEffectsFromBlocks`,
-        // which a NoGravity stand does not feel (measured beside the server).
-        if fire && !self.invisible && !self.marker && !self.no_gravity {
-            if self.fire_ticks > 0 {
-                if !invulnerable(world, "minecraft:in_fire") {
+        // which a marker or NoGravity stand (`noPhysics`) does not feel.
+        if fire && !self.no_physics.unwrap_or(self.marker || self.no_gravity) {
+            // FIRE_IGNITE, `BaseFireBlock.fireIgnite`: a negative `Fire` counts
+            // up by one; from 0 the stand is lit for 8 seconds, every tick it
+            // stays in the fire, against `baseTick`'s countdown.
+            if self.fire_ticks < 0 {
+                self.fire_ticks += 1;
+            }
+            if self.fire_ticks >= 0 {
+                self.fire_ticks = self.fire_ticks.max(160);
+            }
+            // Then `hurt(inFire)`: `ArmorStand.hurtServer` refuses it for an
+            // invulnerable, invisible or marker stand; IGNITES_ARMOR_STANDS
+            // takes 0.15 off a burning stand and lights one that is not for 5
+            // seconds (`igniteForSeconds(5)`).
+            if !self.invisible && !self.marker && !invulnerable(world, "minecraft:in_fire") {
+                if self.fire_ticks > 0 {
                     self.health -= 0.15;
                     hit_by = Some("minecraft:in_fire");
+                } else {
+                    self.fire_ticks = self.fire_ticks.max(100);
                 }
-            } else {
-                self.fire_ticks = 100;
             }
         }
         // Dead: the damage type that ran its health out, which vanilla's
