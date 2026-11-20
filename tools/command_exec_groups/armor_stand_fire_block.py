@@ -11,6 +11,7 @@ STANDS = [
     'Invisible:1b',  # hurtServer refuses: fireIgnite alone
     'Invulnerable:1b',
     'NoGravity:1b',  # noPhysics: no block reaches it
+    'corner',  # on the edge of two fire blocks: one FIRE_IGNITE, an in_fire hurt from each
 ]
 
 
@@ -27,6 +28,10 @@ def cases(cmd, setup):
     for n, nbt in enumerate(STANDS):
         x, z = x0 + 1 + n % 4 * 4, z0 + 2 + n // 4 * 6
         ops.append(cmd(f'/setblock {x} {y0} {z} fire', False))
+        if nbt == 'corner':
+            ops.append(cmd(f'/setblock {x + 1} {y0} {z} fire', False))
+            ops.append(cmd(f'/summon armor_stand {x + 1}.0 {y0} {z}.5 {{UUID:[I;47,0,0,{n}]}}', False))
+            continue
         sep = ',' if nbt else ''
         ops.append(cmd(f'/summon armor_stand {x}.5 {y0} {z}.5 {{UUID:[I;47,0,0,{n}]{sep}{nbt}}}', False))
     for _ in range(6):
