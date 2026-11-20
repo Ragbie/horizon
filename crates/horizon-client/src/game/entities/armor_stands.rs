@@ -1272,8 +1272,8 @@ impl Game<'_> {
     ///   `destroyBlock` under `mobGriefing`, a stand being no player), and
     ///   EXTINGUISH's `clearFire` puts it out;
     /// - FREEZE adds a tick (up to `getTicksRequiredToFreeze`) while the stand
-    ///   can freeze; otherwise it thaws by two. Lava or a fire block igniting
-    ///   it clears the freeze first (`igniteForTicks`), so it ends at 0.
+    ///   can freeze; otherwise it thaws by two. A fire block (`CLEAR_FREEZE`)
+    ///   or lava (`igniteForTicks`) clears the freeze first, so it ends at 0.
     ///
     /// A marker or `NoGravity` stand has `noPhysics`, so no block reaches it
     /// (`Entity.isAffectedByBlocks`), but it still thaws. A stand's
@@ -1314,7 +1314,7 @@ impl Game<'_> {
         if !in_snow && frozen == 0 {
             return;
         }
-        let ignited = a.ignited_by_blocks(&self.world, self.res.facts(), self.pack.assets.registry);
+        let cleared = a.freeze_cleared_by_blocks(&self.world, self.res.facts(), self.pack.assets.registry);
         // ArmorStand inherits LivingEntity.canFreeze: not a spectator, not a
         // `#freeze_immune_entity_types` type (armor_stand is not), and no
         // `#freeze_immune_wearables` piece in an armor slot (the body's too).
@@ -1334,7 +1334,7 @@ impl Game<'_> {
         .filter_map(|slot| a.equipment.get(slot))
         .any(|stack| immune.is_some_and(|tag| tag.contains(&*stack.item)));
         // Java's int arithmetic wraps at the ends.
-        let next = if ignited {
+        let next = if cleared {
             0
         } else if in_snow && can_freeze {
             frozen

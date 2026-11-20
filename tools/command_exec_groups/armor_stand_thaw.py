@@ -16,6 +16,8 @@ STANDS = [
     ('TicksFrozen:60,equipment:{chest:{id:"iron_chestplate",count:1}}', 'powder_snow'),  # iron: freezes
     ('TicksFrozen:60', 'head_snow'),  # snow at its head only: entityInside wants the feet in it
     ('TicksFrozen:100,Invulnerable:1b', 'fire'),  # FIRE_IGNITE -> igniteForTicks -> clearFreeze
+    # fireIgnite only counts -5 up, but a fire block applies CLEAR_FREEZE itself.
+    ('TicksFrozen:100,Invulnerable:1b,Fire:-5s', 'fire'),
 ]
 
 
