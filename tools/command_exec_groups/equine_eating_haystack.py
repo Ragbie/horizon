@@ -7,7 +7,8 @@ def cases(cmd, setup):
     """`AbstractHorse.readAdditionalSaveData` runs `setEating(getBooleanOr("EatingHaystack", false))` and
     `addAdditionalSaveData` writes `isEating()`, so a nonzero byte reads back as 1b. `AbstractHorse.aiStep` ends
     the eating after 50 ticks where `canEatGrass` (not a llama). Each stands on stone, so none starts grazing;
-    the one with AI stands in a pit. Read when summoned and after 60 ticks."""
+    the ones with AI stand in a pit. `Llama.isImmobile` is its eating: the llama with AI runs no goals, so it stays
+    where it was summoned. Read when summoned and after 200 ticks."""
     x0, y0, z0 = 6624, 250, 6624
     # Entities tick once every chunk within 2 columns is loaded (ChunkMap.prepareEntityTickingChunk).
     chunk = [[(x0 >> 4) + dx, (z0 >> 4) + dz] for dx in range(-2, 3) for dz in range(-2, 3)]
@@ -15,10 +16,11 @@ def cases(cmd, setup):
            cmd(f'/fill {x0} {y0 - 1} {z0} {x0 + 15} {y0 - 1} {z0 + 15} stone', expect_result=256)]
     lanes = [('horse', '-1b', 'NoAI:1b,'), ('zombie_horse', '-1b', 'NoAI:1b,'), ('skeleton_horse', '2b', 'NoAI:1b,'),
              ('donkey', '0b', 'NoAI:1b,'), ('llama', '-1b', 'NoAI:1b,'), ('trader_llama', '1b', 'NoAI:1b,'),
-             ('horse', '1b', '')]
+             ('horse', '1b', ''), ('llama', '1b', '')]
     uuids = []
     for n, (kind, eating, extra) in enumerate(lanes, 1):
-        x, z = x0 + 2 + (n - 1) % 4 * 4, z0 + 2 + (n - 1) // 4 * 6
+        # Two rows of four; the llama with AI in a third row, its pit clear of the horse's.
+        x, z = (x0 + 3, z0 + 13) if n == 8 else (x0 + 2 + (n - 1) % 4 * 4, z0 + 2 + (n - 1) // 4 * 6)
         uuids.append(f'{18677:08x}-0000-0000-0000-{n:04x}00000001')
         if not extra:  # a pit of stone around the one that walks
             ops.append(cmd(f'/fill {x - 2} {y0} {z - 2} {x + 2} {y0 + 1} {z + 2} stone', expect_result=50))
@@ -30,9 +32,10 @@ def cases(cmd, setup):
     def reads():
         for uuid in uuids:
             ops.append(cmd(f'/data get entity {uuid} EatingHaystack'))
+        ops.append(cmd(f'/data get entity {uuids[-1]} Pos'))  # the llama with AI
 
     reads()
-    ops.append({'op': 'tick', 'n': 60})
+    ops.append({'op': 'tick', 'n': 200})
     reads()
     return ops + setup(f'/kill @e[type=!player,x={x0},y={y0 - 8},z={z0},dx=16,dy=16,dz=16]',
                        f'/fill {x0} {y0 - 1} {z0} {x0 + 15} {y0 + 3} {z0 + 15} air',

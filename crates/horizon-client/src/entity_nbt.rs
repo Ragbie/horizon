@@ -11124,7 +11124,7 @@ mod camel_inherited_saved_tests {
     }
 
     #[test]
-    fn camel_saved_carry_leaves_the_seven_equine_paths_unchanged() {
+    fn the_seven_equine_paths_load_and_save_their_inherited_fields() {
         for (species, id) in [
             (Species::Horse, "minecraft:horse"),
             (Species::Donkey, "minecraft:donkey"),
@@ -11138,18 +11138,15 @@ mod camel_inherited_saved_tests {
             put(&mut raw, "Tame", Tag::Byte(1));
             let mob = mob_from_nbt(&raw, &types(species, id), 92, None).unwrap();
             assert_eq!(mob.extra.equine_temper, 12);
-            assert!(!mob.extra.flag, "the other species' load path is unchanged");
+            // `EatingHaystack:1b` loads as eating for every equine (#18677).
+            assert!(mob.extra.flag, "{id} loads its eating state");
             for source in [None, Some(&raw)] {
                 let saved = mob_to_nbt(&mob, [92, 0, 0, 1], source, None, |_| None);
                 assert_eq!(saved.get("Temper"), Some(&Tag::Int(12)));
                 assert_eq!(saved.get("Tame"), Some(&Tag::Byte(1)));
                 assert_eq!(saved.get("Bred"), Some(&Tag::Byte(1)));
-                // Preserve the existing raw/default behavior outside Camel;
-                // this control does not claim the other species' eating codec.
-                assert_eq!(
-                    saved.get("EatingHaystack"),
-                    Some(&Tag::Byte(i8::from(source.is_some())))
-                );
+                // The live eating state, with or without the loaded compound.
+                assert_eq!(saved.get("EatingHaystack"), Some(&Tag::Byte(1)));
             }
         }
     }
@@ -11169,7 +11166,12 @@ mod camel_inherited_saved_tests {
             (Species::TraderLlama, "minecraft:trader_llama"),
         ] {
             let types = types(species, id);
-            for (loaded, eating) in [(None, false), (Some(0), false), (Some(-1), true), (Some(1), true)] {
+            for (loaded, eating) in [
+                (None, false),
+                (Some(0), false),
+                (Some(-1), true),
+                (Some(1), true),
+            ] {
                 let mut raw = input(id, None);
                 if let Some(v) = loaded {
                     put(&mut raw, "EatingHaystack", Tag::Byte(v));
