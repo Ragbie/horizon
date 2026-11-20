@@ -22,6 +22,10 @@ def cases(cmd, setup):
         ops.append(cmd(f'/summon {kind} {x}.5 {y0} {z + 2}.5 {{{extra}NoGravity:1b,'
                        f'CustomName:{{text:"s{n}",color:"red",bold:true}}}}'))
         ops.append(cmd(f'/summon {kind} {x}.5 {y0} {z + 1}.5 {{{extra}NoGravity:1b}}'))
+    # Names `ComponentSerialization.CODEC` refuses (a number, a byte, an empty list) and edge cases (an empty
+    # string, an empty compound, a style without contents) on evoker fangs, which have no command target.
+    for n, bad in enumerate(['5', '1b', '[]', '""', '{}', '{color:"red"}', '["a","b"]', '{translate:"entity.minecraft.pig"}']):
+        ops.append(cmd(f'/summon evoker_fangs {x0 + 2 + n}.5 {y0} {z0 + 14}.5 {{CustomName:{bad}}}'))
     return ops + setup('/tick unfreeze', f'/kill @e[type=!player,x={x0},y={y0 - 8},z={z0},dx=16,dy=16,dz=16]',
                        f'/fill {x0} {y0 - 2} {z0} {x0 + 15} {y0 + 4} {z0 + 15} air',
                        f'/forceload remove {x0} {z0}')

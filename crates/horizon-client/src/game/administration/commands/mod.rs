@@ -2224,12 +2224,25 @@ impl Game<'_> {
     /// `SummonCommand.createEntity`: Peaceful admission uses the entity-type
     /// policy for both forms, independently of the mob category.
     fn cmd_summon(&mut self, ctx: &Context) -> R<i32> {
-        /// The CustomName an NBT argument gives the entity (`Entity.load`).
+        /// The CustomName an NBT argument gives the entity (`Entity.load`
+        /// reads it with `ComponentSerialization.CODEC`: a string, a non-empty
+        /// list or a compound with one of the content types' fields; anything
+        /// else loads no name).
         fn summon_custom_name(nbt: &str) -> Option<Text> {
+            use horizon_core::nbt::Tag;
+            const CONTENTS: [&str; 9] = [
+                "type", "text", "translate", "keybind", "score", "selector", "nbt", "sprite",
+                "player",
+            ];
             let (tag, _) = horizon_core::nbt::parse_snbt(nbt).ok()?;
-            let name = tag.get("CustomName")?;
+            let name = horizon_client_core::block_entity_nbt::component(tag.get("CustomName")?)
+                .filter(|n| match n {
+                    Tag::List(l) => !l.is_empty(),
+                    Tag::Compound(c) => CONTENTS.iter().any(|k| c.contains_key(&(*k).into())),
+                    _ => true,
+                })?;
             Some(horizon_client::scoreboard::comp_text(
-                &horizon_client::scoreboard::tag_to_json(name),
+                &horizon_client::scoreboard::tag_to_json(&name),
             ))
         }
         let Some(Arg::Resource(kind)) = ctx.get("entity").cloned() else {
