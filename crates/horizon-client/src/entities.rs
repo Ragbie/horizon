@@ -5106,6 +5106,7 @@ mod orb_lava_tests {
     /// `isInvulnerableToBase`): the 20th tick asks the hook for `on_fire`, and a
     /// refusal keeps the health while the fire burns on.
     #[test]
+    #[ignore = "daily"]
     fn an_invulnerable_orb_keeps_its_health_on_fire() {
         with_fixture(|world, facts, collision, fluids, _| {
             for refuses in [true, false] {
