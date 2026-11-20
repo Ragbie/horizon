@@ -1368,7 +1368,12 @@ impl ExperienceOrb {
             })
         });
         for _ in 0..contacts {
-            let dead = !invulnerable(world, "minecraft:lava") && self.hurt(4.0);
+            // Entity.lavaHurt: the burn sound (and its pitch draw) only for a
+            // hurt `hurtServer` took; an Invulnerable orb's refusal makes none.
+            if invulnerable(world, "minecraft:lava") {
+                continue;
+            }
+            let dead = self.hurt(4.0);
             let pitch = 2.0 + next_float() * 0.4;
             on_sound([self.position.x, self.position.y, self.position.z], pitch);
             if dead {
@@ -5133,7 +5138,7 @@ mod orb_lava_tests {
 
     #[test]
     #[ignore = "daily"]
-    fn an_invulnerable_orb_keeps_its_health_but_still_emits_lava_sound() {
+    fn an_invulnerable_orb_keeps_its_health_and_makes_no_lava_sound() {
         with_fixture(|world, facts, collision, fluids, assets| {
             let lava = assets.registry.default_state("minecraft:lava").unwrap();
             world.set(20, 4, 20, lava).unwrap();
@@ -5163,7 +5168,9 @@ mod orb_lava_tests {
             );
             assert_eq!(orb.health, 5);
             assert_eq!(calls, 1);
-            assert_eq!(sounds, 1);
+            // Entity.lavaHurt plays the burn (and draws its pitch) only for a
+            // hurt hurtServer took.
+            assert_eq!(sounds, 0);
         });
     }
 
