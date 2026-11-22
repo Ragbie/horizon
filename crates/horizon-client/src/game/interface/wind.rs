@@ -39,12 +39,16 @@ pub(super) struct LateWindBurst {
     blocks: Vec<[i32; 3]>,
     /// The entities still to tick when it went off, by id.
     waiting: BTreeSet<u32>,
-    /// The blocks its own reaction changed (a door it opened, the other
-    /// half, what a lever it flipped powered): where, before and after.
-    /// `hurtEntities` runs before `interactWithBlocks`, so the held pushes
-    /// see the blocks as they were before the burst.
-    triggered: Vec<([i32; 3], BlockStateId, BlockStateId)>,
+    /// Where its blocks' reaction starts in the tick's `LateWindChanges`:
+    /// `hurtEntities` runs before `interactWithBlocks`, so its held pushes see
+    /// the blocks without its own changes or those of the bursts after it.
+    changes_from: usize,
 }
+
+/// The blocks the tick's bursts changed while pushes were held (a door one
+/// opened, the other half, what a lever it flipped powered), in order: where,
+/// before and after.
+pub(super) type LateWindChanges = Vec<([i32; 3], BlockStateId, BlockStateId)>;
 
 /// The blocks a burst's rays can cross to reach an entity it may push: the
 /// feet within twice the radius of the centre, and the entity's box above
@@ -623,7 +627,7 @@ impl Game<'_> {
                 blast: burst,
                 blocks: blocks.to_vec(),
                 waiting: waiting_ids,
-                triggered: Vec::new(),
+                changes_from: self.creatures.late_wind_changes.len(),
             });
         }
         pushed
@@ -676,21 +680,32 @@ impl Game<'_> {
     /// its own tick removed is gone.
     pub(super) fn apply_late_wind_pushes(&mut self) {
         let late = std::mem::take(&mut self.creatures.late_wind_pushes);
+        let changes = std::mem::take(&mut self.creatures.late_wind_changes);
         if late.is_empty() {
             return;
         }
+        // The blocks the bursts changed go back as the first burst found them,
+        // last change first (storage only: nothing else sees it), unless
+        // something since changed them again; each burst then measures with
+        // the changes of the bursts before it, and the rest come back after.
+        let mut undone = vec![false; changes.len()];
+        for (i, &([x, y, z], before, after)) in changes.iter().enumerate().rev() {
+            undone[i] = self.world.block(x, y, z) == after && self.world.set_stored(x, y, z, before);
+        }
+        let mut redone = 0;
+        let mut redo_to = |game: &mut Self, end: usize| {
+            for i in redone..end.min(changes.len()) {
+                let ([x, y, z], _, after) = changes[i];
+                if undone[i] {
+                    game.world.set_stored(x, y, z, after);
+                }
+            }
+            redone = redone.max(end);
+        };
         let mut entities = self.take_entities();
         // Every burst of the tick, one after the other.
         for b in &late {
-            // The blocks it changed are put back as it found them while its
-            // pushes are measured (storage only: nothing else sees it), unless
-            // something since changed them again.
-            let mut undone = Vec::new();
-            for &([x, y, z], before, after) in &b.triggered {
-                if self.world.block(x, y, z) == after && self.world.set_stored(x, y, z, before) {
-                    undone.push(([x, y, z], after));
-                }
-            }
+            redo_to(self, b.changes_from);
             for_each_entity_mut!(entities, entity => {
                 if b.waiting.contains(&entity.id())
                     && let Some(push) = self.wind_push_on(
@@ -705,10 +720,8 @@ impl Game<'_> {
                     entity.push_from_explosion(push);
                 }
             });
-            for ([x, y, z], after) in undone {
-                self.world.set_stored(x, y, z, after);
-            }
         }
+        redo_to(self, changes.len());
         self.restore_entities(entities);
     }
     /// `ServerExplosion.hurtEntities` for the player: the push, less
@@ -834,17 +847,20 @@ impl Game<'_> {
         let ctx = horizon_client::sculk::Context::default();
         self.post_game_event("minecraft:explode", center, ctx);
         let mut targets = self.wind_positions(center, radius);
-        let held = self.creatures.late_wind_pushes.len();
         let pushed = self.wind_knockback(center, radius, multiplier, src, &targets);
-        // A burst that holds pushes keeps the blocks as they are now, before
-        // they react, for those pushes to be measured against.
-        let before: Vec<_> = if self.creatures.late_wind_pushes.len() > held {
-            exposure_region(center, radius)
-                .map(|[x, y, z]| ([x, y, z], self.world.block(x, y, z)))
-                .collect()
-        } else {
-            Vec::new()
-        };
+        // While pushes are held (this burst's or an earlier one's of the tick),
+        // the blocks their rays cross are kept as they are now, before they
+        // react, for those pushes to be measured against.
+        let region: BTreeSet<[i32; 3]> = self
+            .creatures
+            .late_wind_pushes
+            .iter()
+            .flat_map(|b| exposure_region(b.center, b.radius))
+            .collect();
+        let before: Vec<_> = region
+            .into_iter()
+            .map(|[x, y, z]| ([x, y, z], self.world.block(x, y, z)))
+            .collect();
         self.wind_burst_knockback(center, radius, multiplier, &targets);
         let block_count = targets.len();
         // Explosion.canTriggerBlocks: a breeze's charge needs mob griefing.
@@ -865,16 +881,11 @@ impl Game<'_> {
                 self.wind_trigger_block(pos)?;
             }
         }
-        if let Some(late) = self.creatures.late_wind_pushes.last_mut()
-            && !before.is_empty()
-        {
-            late.triggered = before
-                .into_iter()
-                .filter_map(|([x, y, z], was)| {
-                    let now = self.world.block(x, y, z);
-                    (now != was).then_some(([x, y, z], was, now))
-                })
-                .collect();
+        for ([x, y, z], was) in before {
+            let now = self.world.block(x, y, z);
+            if now != was {
+                self.creatures.late_wind_changes.push(([x, y, z], was, now));
+            }
         }
         // `ServerLevel.explode`'s `playSound`: a silent source's burst is mute,
         // and the pitch's two client draws only happen when it is heard.

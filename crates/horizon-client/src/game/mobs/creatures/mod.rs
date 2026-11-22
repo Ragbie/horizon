@@ -222,6 +222,8 @@ pub(super) struct Creatures {
     /// Wind bursts held for the entities whose own tick has still to run
     /// (game/interface/wind.rs `apply_late_wind_pushes`).
     pub late_wind_pushes: Vec<super::wind::LateWindBurst>,
+    /// The blocks the tick's bursts changed while those were held.
+    pub late_wind_changes: super::wind::LateWindChanges,
     /// The players a fishing hook can catch, taken as the hooks tick, and
     /// the pulls on them waiting for the hub (game/items/fishing.rs).
     pub hook_targets: Vec<super::fishing::HookTarget>,
