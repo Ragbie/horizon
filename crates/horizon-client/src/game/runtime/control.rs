@@ -151,21 +151,12 @@ impl Game<'_> {
             atlas: horizon_client::gfx::capture::AtlasCheck::of(&self.pack.render),
         }
     }
-    /// The frame summary, with Horizon's own passes' median GPU times while they are timed.
+    /// The frame summary, with the median GPU times of Horizon's own passes and of the shader
+    /// pack's while they are timed.
     fn summary_with_passes(&self) -> Value {
         let mut summary = self.frame_stats.summary();
-        let passes = self
-            .renderer
-            .as_ref()
-            .map(|r| r.own_pass_times())
-            .unwrap_or_default();
-        if !passes.is_empty() {
-            summary["gpu_passes"] = Value::Object(
-                passes
-                    .into_iter()
-                    .map(|(name, ms)| (name, json!(ms)))
-                    .collect(),
-            );
+        if let Some(r) = self.renderer.as_ref() {
+            add_pass_times(&mut summary, r.own_pass_times(), r.shader_pass_times());
         }
         if let Some(r) = self.renderer.as_ref().filter(|r| r.pass_detail())
             && let Some(support) = r.pass_detail_support()
@@ -180,7 +171,7 @@ impl Game<'_> {
     }
 
     fn add_async_occlusion_stats(&self, summary: &mut Value) {
-        if let Some(culler) = &self.async_occlusion_culler {
+        if let Some(culler) = self.occlusion.asynchronous() {
             summary["async_occlusion_culling"] = culler.stats_value();
         }
     }
@@ -204,7 +195,7 @@ impl Game<'_> {
     }
     fn reset_frame_stats(&mut self) {
         self.frame_stats.reset();
-        if let Some(culler) = &self.async_occlusion_culler {
+        if let Some(culler) = self.occlusion.asynchronous() {
             culler.reset_stats();
         }
     }
@@ -219,6 +210,19 @@ impl Game<'_> {
             } else {
                 self.pending_bench = Some((deadline, reply, raw));
             }
+        }
+        // Without frames too: a screenshot no frame takes fails rather than waiting for good.
+        // A result still to be answered (a rebuilt renderer carries it over) is left to the
+        // next frame, which answers it whether or not it is drawn.
+        let renderer = self.renderer.as_mut();
+        if renderer.as_ref().is_none_or(|r| r.screenshot_result.is_none()) {
+            let not_drawn = renderer.as_ref().and_then(|r| r.not_drawn());
+            super::pending_screenshot::expire(
+                &mut self.pending_screenshot,
+                renderer.map(|r| &mut r.screenshot),
+                not_drawn,
+                Instant::now(),
+            );
         }
         horizon_client::widgets::end_frame(self.frames);
         self.narrate_screen();
@@ -1116,19 +1120,16 @@ impl Game<'_> {
             }
             "screenshot" => {
                 let renderer = self.renderer.as_mut().ok_or("no renderer yet")?;
-                if self.pending_screenshot.is_some() {
-                    return Err("a screenshot is already pending".into());
-                }
                 arg(1)?;
                 // The rest of the line: a path may hold spaces.
                 let path = line.trim_start().strip_prefix("screenshot").unwrap_or("");
-                renderer.screenshot = Some(horizon_client::gfx::ScreenshotRequest {
-                    path: path.trim().into(),
-                    size: None,
-                    scaled: false,
-                    background: false,
-                });
-                self.pending_screenshot = Some(reply.clone());
+                super::pending_screenshot::begin(
+                    &mut self.pending_screenshot,
+                    &mut renderer.screenshot,
+                    path.trim().into(),
+                    reply,
+                    Instant::now(),
+                )?;
                 Ok(None)
             }
             "chat" => {
@@ -1560,6 +1561,8 @@ impl Game<'_> {
                 "backend": format!("{:?}", r.info.backend),
                 "size": [r.config.width, r.config.height],
                 "present_mode": format!("{:?}", r.config.present_mode),
+                "msaa_requested": r.msaa_requested(),
+                "msaa_samples": r.msaa_samples(),
                 "drawn_sections": r.drawn_sections,
                 "section_draws": r.section_draws,
                 "section_draw_calls": r.section_draw_calls,
@@ -1676,6 +1679,9 @@ impl Game<'_> {
                 .map(|e| self.shown_name_tags(glam::DVec3::from_array(e))),
         });
         status["lod"] = lod;
+        // Why `frames` stands still, if it does (#19436).
+        let not_drawn = self.renderer.as_ref().and_then(|r| r.not_drawn());
+        status["not_drawn"] = not_drawn.map(|n| n.as_str()).into();
         // Parallel Tick: the setting, whether the next tick shares its work, and Auto's state.
         let (setting, on, auto) = horizon_client::parallel::status();
         status["parallel_tick"] = json!({ "setting": setting, "on": on, "auto": auto });
@@ -1850,6 +1856,23 @@ fn gpu_pass_switches(word: Option<&str>, now: (bool, bool)) -> Result<(bool, boo
     }
 }
 
+/// Adds the timed passes to a frame summary: Horizon's own under `gpu_passes`, the shader
+/// pack's (its sky, shadow map, post passes and tone map, by the names its manifest gives
+/// them) under `shader_passes`. Two keys, since a pack may name a pass as one of Horizon's
+/// ("World"). An empty list adds nothing.
+fn add_pass_times(summary: &mut Value, own: Vec<(String, f32)>, pack: Vec<(String, f32)>) {
+    for (key, passes) in [("gpu_passes", own), ("shader_passes", pack)] {
+        if !passes.is_empty() {
+            summary[key] = Value::Object(
+                passes
+                    .into_iter()
+                    .map(|(name, ms)| (name, json!(ms)))
+                    .collect(),
+            );
+        }
+    }
+}
+
 /// The `gpu-passes` reply: the switches and what detail can show on this device.
 fn gpu_passes_reply(
     passes: bool,
@@ -1903,6 +1926,39 @@ mod tests {
         names.sort_unstable();
         names.dedup();
         assert_eq!(names.len(), features.len(), "a group is named twice");
+    }
+
+    #[test]
+    fn a_shader_packs_passes_sit_beside_horizons_own_and_only_while_timed() {
+        let times = |names: &[(&str, f32)]| -> Vec<(String, f32)> {
+            names.iter().map(|&(n, ms)| (n.to_owned(), ms)).collect()
+        };
+        let mut summary = json!({ "frames": 60 });
+        add_pass_times(
+            &mut summary,
+            times(&[("World", 0.25), ("HUD", 0.0625)]),
+            times(&[("Sky", 0.125), ("World", 0.5)]),
+        );
+        assert_eq!(
+            summary["gpu_passes"],
+            json!({ "World": 0.25, "HUD": 0.0625 })
+        );
+        assert_eq!(
+            summary["shader_passes"],
+            json!({ "Sky": 0.125, "World": 0.5 })
+        );
+
+        let mut summary = json!({ "frames": 60 });
+        add_pass_times(&mut summary, times(&[("World", 0.25)]), Vec::new());
+        assert_eq!(
+            summary,
+            json!({ "frames": 60, "gpu_passes": { "World": 0.25 } })
+        );
+        add_pass_times(&mut summary, Vec::new(), Vec::new());
+        assert_eq!(
+            summary,
+            json!({ "frames": 60, "gpu_passes": { "World": 0.25 } })
+        );
     }
 
     #[test]

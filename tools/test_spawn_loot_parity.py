@@ -23,6 +23,8 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import fast_bins  # noqa: E402
+import lab  # noqa: E402
 from test_save_roundtrip_parity import Vanilla  # noqa: E402
 from test_world_reopen_parity import game_env  # noqa: E402
 
@@ -71,7 +73,7 @@ def main():
     args = parser.parse_args()
     bin_dir = Path(args.bin_dir).resolve() if args.bin_dir else None
     if bin_dir is None:
-        subprocess.run(['cargo', 'build', '--locked', '--profile', 'fast', '-p', 'horizon-game', '-p', 'horizon-client-lib', '--bins'], cwd=ROOT, check=True)
+        subprocess.run(fast_bins.command('horizon-client', 'horizon-ctl'), cwd=ROOT, check=True)
         bin_dir = ROOT / os.environ.get('CARGO_TARGET_DIR', 'target') / 'fast'
     shutil.rmtree(RUN, ignore_errors=True)
     RUN.mkdir(parents=True)
@@ -87,7 +89,7 @@ def main():
         socket = Path(tempfile.mkdtemp(prefix='hzsl')) / 'control.sock'  # sockets need short paths
 
         def ctl(*words, check=True):
-            result = subprocess.run([str(bin_dir / 'horizon-ctl'), '--socket', str(socket), '--timeout', '600',
+            result = subprocess.run([str(lab.binary(bin_dir, 'horizon-ctl')), '--socket', str(socket), '--timeout', '600',
                                      *map(str, words)], cwd=folder, env=env, capture_output=True, text=True)
             if check and result.returncode:
                 sys.exit(f'horizon-ctl {" ".join(map(str, words))} failed: {result.stdout}{result.stderr}')
