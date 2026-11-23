@@ -1649,17 +1649,20 @@ impl Projectile {
     /// `from`, each once. A bubble column pushes when the move was long or the
     /// final box (deflated by 1e-5F) is inside it; honey doesn't read that.
     pub fn bubble_columns_along(&mut self, w: &impl ProjectileWorld, from: Vec3) {
-        self.bubble_columns_since(from, |p| w.bubble_column(p), |p| w.honey(p));
+        self.bubble_columns_since(from, |p| w.bubble_column(p), |p| w.honey(p), true);
     }
     /// [`bubble_columns_along`](Self::bubble_columns_along) with the bubble
     /// columns read by `column` and the honey blocks by `honey`, for a move
     /// made by something else: a piston's push applies the block effects too
-    /// (`moveEntityByPiston`'s `applyEffectsFromBlocks`).
+    /// (`moveEntityByPiston`'s `applyEffectsFromBlocks`). Without `columns`
+    /// (an arrow in the ground: `AbstractArrow.onInsideBubbleColumn` returns)
+    /// only the honey acts.
     pub fn bubble_columns_since(
         &mut self,
         from: Vec3,
         column: impl Fn([i32; 3]) -> Option<(bool, bool)>,
         honey: impl Fn([i32; 3]) -> bool,
+        columns: bool,
     ) {
         let to = self.position;
         let eps = f64::from(1.0e-5_f32);
@@ -1668,9 +1671,16 @@ impl Projectile {
         // Each block once, in the sweep's order.
         for p in swept_cells(from, to, deflated) {
             if honey([p.x, p.y, p.z]) {
+                // HoneyBlock.doSlideMovement ends with resetFallDistance.
                 if self.honey_slide([p.x, p.y, p.z]) {
                     self.fall_distance = 0.0;
+                    if let Some(arrow) = self.arrow.as_mut() {
+                        arrow.fall_distance = 0.0;
+                    }
                 }
+                continue;
+            }
+            if !columns {
                 continue;
             }
             let Some((drag, surface)) = column([p.x, p.y, p.z]) else {

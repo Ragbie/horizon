@@ -1290,9 +1290,24 @@ def projectile_honey_slide():
                 '{NoAI:1b,NoGravity:1b,Invulnerable:1b,UUID:[I;21000,0,99,1]}', expect_result=1),
             cmd(f'/summon trident {x0 + 9.22} {y0 + 9} {z0 + 1}.5 {{UUID:[I;21000,0,{impale},1],'
                 'Motion:[0.05d,-0.6d,0d],pickup:0b}', expect_result=1)]
+    # A piston pushes a falling arrow south along an upward bubble column (x = xs) into the honey beside it
+    # (xs + 1, one block south). `moveEntityByPiston`'s `applyEffectsFromBlocks` visits each block the push
+    # crossed once, in the sweep's order: the column's push and the honey's slide each act once.
+    # The arrow's box reaches 0.03 into the honey's cell, outside its inset shape (it slides).
+    xs, yb, zb = x0 + 12, y0, z0 + 6
+    pushed = impale + 1
+    ops += [cmd(f'/setblock {xs} {yb - 1} {zb} soul_sand', expect_result=1),
+            cmd(f'/setblock {xs} {yb - 1} {zb + 1} soul_sand', expect_result=1),
+            cmd(f'/fill {xs} {yb} {zb} {xs} {yb + 3} {zb + 1} bubble_column[drag=false]', expect_result=8),
+            cmd(f'/fill {xs + 1} {yb} {zb + 1} {xs + 1} {yb + 3} {zb + 1} honey_block', expect_result=4),
+            cmd(f'/setblock {xs + 1} {yb + 2} {zb - 2} piston[facing=south]', expect_result=1),
+            cmd(f'/setblock {xs + 1} {yb + 2} {zb - 1} stone', expect_result=1),
+            cmd(f'/summon arrow {xs + 0.78} {yb + 2.6} {zb}.5 {{UUID:[I;21000,0,{pushed},1],'
+                'Motion:[0d,-0.5d,0d],NoGravity:1b,fall_distance:4d,pickup:0b}', expect_result=1),
+            cmd(f'/setblock {xs + 1} {yb + 3} {zb - 2} redstone_block', expect_result=1)]
 
     def reads():
-        for n in range(1, impale + 1):
+        for n in range(1, pushed + 1):
             for key in ('Motion', 'Pos', 'fall_distance'):
                 ops.append(cmd(f'/data get entity 00005208-0000-0000-0000-{n:04x}00000001 {key}'))
 
