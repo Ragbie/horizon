@@ -2369,6 +2369,22 @@ impl io_pool::Session for PlayConn {
         if self.payload_transport.closed() {
             return Verdict::Go;
         }
+        if id == crate::net::EXPORT_FENCE
+            && matches!(
+                self.payload_sender.framing,
+                horizon_protocol::connection::Framing::Memory
+            )
+            && self.is_owner()
+            && payload.len() == size_of::<u64>()
+        {
+            // All earlier packets on this connection have entered the server
+            // ingress queue before the client can receive this echo.
+            let mut body = horizon_protocol::buf::Writer::new();
+            body.varint(id);
+            body.bytes(&payload);
+            self.payload_sender.send(body.data);
+            return Verdict::Go;
+        }
         // Only the ids the protocol has: a client sending others (up to 2^31 of them) must not grow the
         // connection's table, so all of those are counted under one id, -1.
         self.packet_counts.add(
@@ -2722,11 +2738,24 @@ pub(super) fn frame_body(
     body: &[u8],
     out: &mut Vec<u8>,
 ) -> horizon_protocol::Result<()> {
-    // Renumbered first for a client of an older release; one with no such packet gets nothing.
-    let Some(body) = writer.for_client(body)? else {
-        return Ok(());
-    };
-    let body = &body[..];
+    // Renumbered first for a client of an older release; one with no such packet gets nothing, and what a packet
+    // brought with it (a boat's wood, an experience orb's value) follows it.
+    // A client of this release takes the body as it is: no allocation per packet.
+    if !writer.serves_older_client() {
+        return frame_one(writer, body, out);
+    }
+    for body in writer.for_client(body)? {
+        frame_one(writer, &body, out)?;
+    }
+    Ok(())
+}
+
+/// One packet body, already in the client's numbering, framed into `out`.
+fn frame_one(
+    writer: &mut ConnWriter,
+    body: &[u8],
+    out: &mut Vec<u8>,
+) -> horizon_protocol::Result<()> {
     match writer.framing() {
         horizon_protocol::connection::Framing::Network(Some(t))
             if body.len() >= t.max(SHARED_FRAME_MIN) =>

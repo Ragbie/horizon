@@ -577,8 +577,16 @@ impl Game<'_> {
             Target::Mob(id) => self.mob_command_name(id),
             other => {
                 // Entity.getDisplayName: the CustomName component, else the type.
+                // An ominous item spawner keeps its compound in its own `raw`.
                 let custom = super::native_entities::target_id(other)
-                    .and_then(|id| self.persist_raw(id))
+                    .and_then(|id| {
+                        self.persist_raw(id).or_else(|| {
+                            self.ominous_spawners
+                                .iter()
+                                .find(|s| s.id == id)
+                                .and_then(|s| s.raw.as_deref())
+                        })
+                    })
                     .and_then(|r| r.get("CustomName"));
                 if let Some(c) = custom {
                     return horizon_client::scoreboard::comp_text(
@@ -2118,21 +2126,20 @@ impl Game<'_> {
                 self.ui.death_cause = Some("death.attack.genericKill".into());
             }
             Target::Mob(id) => {
-                let mut killed = None;
-                if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-                    // LivingEntity.kill: a generic_kill hit of Float.MAX_VALUE,
-                    // which its death message tells.
-                    let alive = m.alive();
-                    if alive {
-                        let source = horizon_client::mobs::Damage::of(
-                            horizon_client::mobs::DamageKind::GenericKill,
-                        );
-                        m.record_damage(source, f32::MAX);
-                        m.last_damage = Some((source, i64::from(m.age)));
-                    }
-                    m.health = 0.0;
-                    killed = alive.then(|| m.clone());
+                // LivingEntity.kill: `hurtServer` with a generic_kill hit of Float.MAX_VALUE, as
+                // /damage hurts (hurt time, death message); the type bypasses invulnerability and
+                // totems and deals no knockback. The death ticks start on the next tick.
+                let alive = self.mobs.iter().any(|m| m.id == id && m.alive());
+                if alive {
+                    let kill = horizon_client::mobs::DamageKind::GenericKill;
+                    self.command_damage_mob(id, f32::MAX, horizon_client::mobs::Damage::of(kill));
                 }
+                let killed = self
+                    .mobs
+                    .iter()
+                    .find(|m| m.id == id && !m.alive())
+                    .filter(|_| alive)
+                    .cloned();
                 // The hit runs LivingEntity.die before the command returns:
                 // its ENTITY_DIE, loot and experience come now, not in the
                 // next tick's deaths, which skip it (as a frog's bite does).
@@ -2223,6 +2230,27 @@ impl Game<'_> {
     /// `SummonCommand.createEntity`: Peaceful admission uses the entity-type
     /// policy for both forms, independently of the mob category.
     fn cmd_summon(&mut self, ctx: &Context) -> R<i32> {
+        /// The CustomName an NBT argument gives the entity (`Entity.load`
+        /// reads it with `ComponentSerialization.CODEC`: a string, a non-empty
+        /// list or a compound with one of the content types' fields; anything
+        /// else loads no name).
+        fn summon_custom_name(nbt: &str) -> Option<Text> {
+            use horizon_core::nbt::Tag;
+            const CONTENTS: [&str; 9] = [
+                "type", "text", "translate", "keybind", "score", "selector", "nbt", "sprite",
+                "player",
+            ];
+            let (tag, _) = horizon_core::nbt::parse_snbt(nbt).ok()?;
+            let name = horizon_client_core::block_entity_nbt::component(tag.get("CustomName")?)
+                .filter(|n| match n {
+                    Tag::List(l) => !l.is_empty(),
+                    Tag::Compound(c) => CONTENTS.iter().any(|k| c.contains_key(&(*k).into())),
+                    _ => true,
+                })?;
+            Some(horizon_client::scoreboard::comp_text(
+                &horizon_client::scoreboard::tag_to_json(&name),
+            ))
+        }
         let Some(Arg::Resource(kind)) = ctx.get("entity").cloned() else {
             return Ok(0);
         };
@@ -2237,9 +2265,12 @@ impl Game<'_> {
             let before = self.spawned_mark();
             let name = match self.summon_with_nbt(&kind, pos, &nbt)? {
                 Some(target) => self.target_name(target),
-                // Spawned as a kind no command target stands for (primed
-                // TNT, falling blocks, projectiles): its type's name.
-                None if self.spawned_mark() != before => data::summon_type_name(&kind),
+                // Spawned as a kind no command target stands for (evoker
+                // fangs, area effect clouds, experience orbs):
+                // `Entity.getDisplayName`, its loaded CustomName, else its type's name.
+                None if self.spawned_mark() != before => {
+                    summon_custom_name(&nbt).unwrap_or_else(|| data::summon_type_name(&kind))
+                }
                 None => return Err(err("commands.summon.failed", &[])),
             };
             self.feedback(Text::translate("commands.summon.success", &[name]));
