@@ -2143,6 +2143,23 @@ mod tests {
             Vec3::new(0.0, (-0.5 - 0.03) * air, 0.0)
         );
     }
+    /// `HoneyBlock.isSlidingDown` slides only when `dx + 1.0E-7 > overlap` or
+    /// `dz + 1.0E-7 > overlap`, so at exact equality nothing slides, and a
+    /// hair further out it does.
+    #[test]
+    fn honey_slides_only_strictly_past_the_overlap() {
+        let overlap = 0.4375 + f64::from(0.25_f32 / 2.0);
+        let falling = Vec3::new(0.0, -0.5, 0.0);
+        // Honey at x -1 (centre -0.5): beside it x is near 0.0625, fine
+        // enough in f64 to land `dx + 1.0E-7` exactly on the overlap.
+        let at = |x: f64| honey_slide(falling, Vec3::new(x, 209.0, 10.5), false, 0.25, [-1, 209, 10]);
+        let edge = (0..4096)
+            .map(|step| f64::from_bits((overlap - 0.5 - 1.0e-7).to_bits() - 2048 + step))
+            .find(|&x| (-0.5 - x).abs() + 1.0e-7 == overlap)
+            .expect("an x at exact equality");
+        assert_eq!(at(edge), None);
+        assert!(at(edge + 1.0e-9).is_some());
+    }
     /// A pearl resting in the water of a column, past its first tick.
     fn resting_pearl() -> Projectile {
         let mut p = Projectile::new(ProjectileKind::EnderPearl, Vec3::new(0.5, 100.2, 0.5), None);

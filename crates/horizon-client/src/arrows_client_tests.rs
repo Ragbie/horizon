@@ -51,6 +51,7 @@ fn shape_tag(shape: &VoxelShape) -> Tag {
 }
 
 const TNT: u32 = 20;
+const HONEY: u32 = 21;
 struct Rules<'o> {
     mob_griefing: bool,
     owners: &'o dyn OwnerLookup,
@@ -87,6 +88,7 @@ fn run_in(
         definitions.push(("bubble_column", Some(("drag", drag.to_string()))));
     }
     definitions.push(("tnt", None));
+    definitions.push(("honey_block", None));
     let states: Vec<_> = definitions
         .iter()
         .map(|(name, property)| {
@@ -108,6 +110,7 @@ fn run_in(
                 ("minecraft:water", Tag::Int(2)),
                 ("minecraft:bubble_column", Tag::Int(18)),
                 ("minecraft:tnt", Tag::Int(TNT as i32)),
+                ("minecraft:honey_block", Tag::Int(HONEY as i32)),
             ]),
         ),
     ]))
@@ -124,7 +127,7 @@ fn run_in(
         serde_json::json!({"states":(0..states.len()).map(|id|serde_json::json!({"id":id})).collect::<Vec<_>>()} ).to_string(),
     )
     .unwrap();
-    let behaviours = serde_json::json!({"states":(0..states.len()).map(|id|if id==1||id==20{[63,0]}else{[0,0]}).collect::<Vec<_>>(),"blocks":(["air","stone","water","bubble_column","tnt"].iter().map(|name|serde_json::json!({"name":format!("minecraft:{name}"),"class":["Block"]})).collect::<Vec<_>>())});
+    let behaviours = serde_json::json!({"states":(0..states.len()).map(|id|if id==1||id==20{[63,0]}else{[0,0]}).collect::<Vec<_>>(),"blocks":(["air","stone","water","bubble_column","tnt","honey_block"].iter().map(|name|serde_json::json!({"name":format!("minecraft:{name}"),"class":["Block"]})).collect::<Vec<_>>())});
     let facts = BlockFacts::load_with_behaviour_json(&root, &registry, &behaviours).unwrap();
     std::fs::remove_dir_all(root).unwrap();
     let table = Tag::compound([
@@ -139,7 +142,7 @@ fn run_in(
         ),
         (
             "cached_shapes",
-            Tag::IntArray((0..21).map(|id| i32::from(id == 1 || id == TNT)).collect()),
+            Tag::IntArray((0..22).map(|id| i32::from(id == 1 || id == TNT)).collect()),
         ),
     ]);
     let collision = BlockCollisionRegistry::new(Arc::new(
@@ -256,6 +259,36 @@ fn an_arrow_owned_by_an_armor_stand_needs_mob_griefing_to_prime_tnt() {
     // An owner that isn't loaded is no owner (getOwner is null).
     assert!(primes_tnt(Some([9, 9, 9, 9]), false));
     assert!(primes_tnt(None, false));
+}
+
+/// `HoneyBlock.entityInside` from `AbstractArrow.applyEffectsFromBlocks`: an
+/// arrow falling beside a honey column, 0.72 east of its centre (outside
+/// `isSlidingDown`'s 0.4375 + half-width 0.25, inside the cell), slides at
+/// `getNewDeltaY(-0.05)` with its fall reset, then takes its own drag (0.99F)
+/// and gravity (0.05), as the trident does. One 0.65 away is inside the
+/// overlap and keeps falling.
+#[test]
+fn an_arrow_beside_honey_slides_down_it_before_its_drag_and_gravity() {
+    let honey: Vec<_> = (15..=18).map(|y| ([0, y, 0], HONEY)).collect();
+    let fall = |x: f64| {
+        let rules = Rules {
+            mob_griefing: true,
+            owners: &(),
+            server: true,
+        };
+        let steps = run_in(&honey, 1, false, rules, |p| {
+            p.position = Vec3::new(x, 18.0, 0.5);
+            p.velocity = Vec3::new(0.0, -0.5, 0.0);
+            p.arrow.as_mut().unwrap().fall_distance = 5.0;
+        });
+        let p = &steps[0];
+        (p.velocity, p.arrow.as_ref().unwrap().fall_distance)
+    };
+    let air = f64::from(0.99_f32);
+    let (velocity, fall_distance) = fall(1.22);
+    assert_eq!(velocity, Vec3::new(0.0, -0.1761260036697388, 0.0));
+    assert_eq!(fall_distance, 0.0);
+    assert_eq!(fall(1.15).0, Vec3::new(0.0, -0.5 * air - 0.05, 0.0));
 }
 
 #[test]
